@@ -229,6 +229,7 @@ export const AGENT_BUILDER_BUILTIN_SKILLS = [
   'graph-creation',
   'agent-builder-traces',
   'proposal-management',
+  'software-inventory',
 
   // Platform – Cases
   'cases-management',
