@@ -14,8 +14,8 @@ import { isKnownVendorProduct } from './integration_map';
 import type { KevResponse, NvdResponse, ParsedNvd } from './nvd_parse';
 import { intersectKev, parseKevCveIds, parseNvdResponse } from './nvd_parse';
 
-const NVD_URL = 'https://services.nvd.nist.gov/rest/json/cves/2.0';
-const KEV_URL =
+export const NVD_URL = 'https://services.nvd.nist.gov/rest/json/cves/2.0';
+export const KEV_URL =
   'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
 const SPACING_NO_KEY_MS = 6000;
 const SPACING_WITH_KEY_MS = 700;
@@ -38,10 +38,11 @@ class NetworkUnavailableError extends Error {}
 const fetchWithTimeout = async (
   fetchFn: typeof fetch,
   url: string,
-  headers: Record<string, string>
+  headers: Record<string, string>,
+  timeoutMs: number
 ): Promise<Response> => {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetchFn(url, { headers, signal: controller.signal });
   } finally {
@@ -56,33 +57,41 @@ const isAbortError = (error: unknown): boolean =>
 const fetchNvd = async (
   fetchFn: typeof fetch,
   cpe: string,
-  apiKey: string | undefined
+  apiKey: string | undefined,
+  nvdBaseUrl: string,
+  timeoutMs: number,
+  backoffBaseMs: number
 ): Promise<NvdResponse> => {
-  const url = `${NVD_URL}?cpeName=${encodeURIComponent(cpe)}&noRejected`;
+  const url = `${nvdBaseUrl}?cpeName=${encodeURIComponent(cpe)}&noRejected`;
   const headers: Record<string, string> = apiKey ? { apiKey } : {};
   for (let attempt = 0; ; attempt++) {
     let response: Response;
     try {
-      response = await fetchWithTimeout(fetchFn, url, headers);
+      response = await fetchWithTimeout(fetchFn, url, headers, timeoutMs);
     } catch (error) {
       if (!isAbortError(error)) {
         throw new NetworkUnavailableError('NVD is not reachable');
       }
       if (attempt >= MAX_RETRIES) throw new Error('NVD request timed out');
-      await sleep(BACKOFF_BASE_MS * 2 ** attempt);
+      await sleep(backoffBaseMs * 2 ** attempt);
       continue;
     }
     if (response.ok) return (await response.json()) as NvdResponse;
     if (!RETRYABLE_STATUS(response.status) || attempt >= MAX_RETRIES) {
       throw new Error(`NVD responded with status ${response.status}`);
     }
-    await sleep(BACKOFF_BASE_MS * 2 ** attempt);
+    await sleep(backoffBaseMs * 2 ** attempt);
   }
 };
 
-const loadKev = async (fetchFn: typeof fetch, logger: Logger): Promise<Set<string> | undefined> => {
+const loadKev = async (
+  fetchFn: typeof fetch,
+  logger: Logger,
+  kevUrl: string,
+  timeoutMs: number
+): Promise<Set<string> | undefined> => {
   try {
-    const response = await fetchWithTimeout(fetchFn, KEV_URL, {});
+    const response = await fetchWithTimeout(fetchFn, kevUrl, {}, timeoutMs);
     if (!response.ok) {
       logger.warn(`CISA KEV catalog responded with status ${response.status}`);
       return undefined;
@@ -191,14 +200,40 @@ export const enrichCatalogEntries = async ({
   logger,
   limit,
   fetchFn = fetch,
+  nvdBaseUrl = NVD_URL,
+  kevUrl = KEV_URL,
+  requestSpacingMs,
+  requestTimeoutMs = REQUEST_TIMEOUT_MS,
+  backoffBaseMs = BACKOFF_BASE_MS,
 }: {
   esClient: ElasticsearchClient;
   logger: Logger;
   limit: number;
   fetchFn?: typeof fetch;
+  /** Overrides the NVD CVE endpoint, for tests against a local stub. */
+  nvdBaseUrl?: string;
+  /** Overrides the CISA KEV feed URL, for tests against a local stub. */
+  kevUrl?: string;
+  /** Overrides the delay between NVD requests; wins over the API-key based default. */
+  requestSpacingMs?: number;
+  /** Overrides the per-request timeout. */
+  requestTimeoutMs?: number;
+  /** Overrides the base retry delay; retry n waits `backoffBaseMs * 2^n`. */
+  backoffBaseMs?: number;
 }): Promise<{ checked: number; updated: number; failed: number }> => {
   const apiKey = process.env.NVD_API_KEY || undefined;
-  const spacing = apiKey ? SPACING_WITH_KEY_MS : SPACING_NO_KEY_MS;
+  const spacing = requestSpacingMs ?? (apiKey ? SPACING_WITH_KEY_MS : SPACING_NO_KEY_MS);
+  if (
+    nvdBaseUrl !== NVD_URL ||
+    kevUrl !== KEV_URL ||
+    requestSpacingMs !== undefined ||
+    requestTimeoutMs !== REQUEST_TIMEOUT_MS ||
+    backoffBaseMs !== BACKOFF_BASE_MS
+  ) {
+    logger.info(
+      `CVE enrichment override is active (NVD: ${nvdBaseUrl}, KEV: ${kevUrl}, requestSpacing: ${spacing}ms, requestTimeout: ${requestTimeoutMs}ms, backoffBase: ${backoffBaseMs}ms); results are not from the live services`
+    );
+  }
 
   const search = await esClient.search<CatalogEntry>({
     index: CATALOG_INDEX,
@@ -209,7 +244,7 @@ export const enrichCatalogEntries = async ({
   const hits = search.hits.hits.filter((hit) => hit._source !== undefined);
   if (hits.length === 0) return { checked: 0, updated: 0, failed: 0 };
 
-  const kev = await loadKev(fetchFn, logger);
+  const kev = await loadKev(fetchFn, logger, kevUrl, requestTimeoutMs);
 
   const operations: Array<Record<string, unknown>> = [];
   const pushUpdate = (id: string, doc: object): void => {
@@ -232,7 +267,14 @@ export const enrichCatalogEntries = async ({
     requests++;
     try {
       const cpe = buildCpe(entry);
-      const response = await fetchNvd(fetchFn, cpe, apiKey);
+      const response = await fetchNvd(
+        fetchFn,
+        cpe,
+        apiKey,
+        nvdBaseUrl,
+        requestTimeoutMs,
+        backoffBaseMs
+      );
       const parsed = parseNvdResponse(response, {
         nvdVendor: toNvdVendor(entry.vendor),
         product: entry.product,

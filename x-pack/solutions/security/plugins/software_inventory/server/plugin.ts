@@ -71,6 +71,7 @@ export class SoftwareInventoryServerPlugin
       workflowsExtensions,
       getEsClient,
       logger: this.logger.get('steps'),
+      enrichment: this.config.enrichment,
     });
     registerSoftwareInventoryFeature(features);
     registerRoutes({ router: core.http.createRouter(), logger: this.logger, getEsClient });

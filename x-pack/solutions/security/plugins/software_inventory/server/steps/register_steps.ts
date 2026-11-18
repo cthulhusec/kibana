@@ -6,6 +6,7 @@
  */
 
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
+import type { Duration } from 'moment';
 import {
   createServerStepDefinition,
   type WorkflowsExtensionsServerPluginSetup,
@@ -31,6 +32,14 @@ export interface RegisterStepsDeps {
   /** Internal-user client: the inventory indices are plugin-owned and hidden. */
   getEsClient: () => Promise<ElasticsearchClient>;
   logger: Logger;
+  /** Optional endpoint overrides for CVE enrichment; unset values use the live services. */
+  enrichment?: {
+    nvdBaseUrl?: string;
+    kevUrl?: string;
+    requestSpacing?: Duration;
+    requestTimeout?: Duration;
+    backoffBase?: Duration;
+  };
 }
 
 /** Converts the step's nullable row fields into the optional fields `RawCandidate` uses. */
@@ -66,6 +75,7 @@ export const registerSoftwareInventorySteps = ({
   workflowsExtensions,
   getEsClient,
   logger,
+  enrichment,
 }: RegisterStepsDeps): void => {
   workflowsExtensions.registerStepDefinition(
     createServerStepDefinition({
@@ -93,6 +103,17 @@ export const registerSoftwareInventorySteps = ({
           esClient: await getEsClient(),
           logger,
           limit: input.limit,
+          ...(enrichment?.nvdBaseUrl ? { nvdBaseUrl: enrichment.nvdBaseUrl } : {}),
+          ...(enrichment?.kevUrl ? { kevUrl: enrichment.kevUrl } : {}),
+          ...(enrichment?.requestSpacing
+            ? { requestSpacingMs: enrichment.requestSpacing.asMilliseconds() }
+            : {}),
+          ...(enrichment?.requestTimeout
+            ? { requestTimeoutMs: enrichment.requestTimeout.asMilliseconds() }
+            : {}),
+          ...(enrichment?.backoffBase
+            ? { backoffBaseMs: enrichment.backoffBase.asMilliseconds() }
+            : {}),
         });
         return { output };
       },

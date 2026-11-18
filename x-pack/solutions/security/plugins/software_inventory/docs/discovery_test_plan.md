@@ -510,7 +510,7 @@ so a careless fixture produces false findings.
 
 | CPE (`cpeName`) | Behavior | Expected catalog update |
 |---|---|---|
-| `cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*` | 200, CVE-2021-44228 (10.0), -45046 (9.0), -45105 (5.9), -44832 (6.6), three branch ranges each | `cve_count: 4`, `max_cvss: 10`, `fixed_in: 2.17.1`, `latest_known_fix: 2.17.1`, `fully_remediated: true`, `unfixed_cve_ids: []`, `known_exploited: true`, per-CVE `fixed_in` 2.15.0 / 2.16.0 / 2.17.1 / 2.17.0 |
+| `cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*` | 200, CVE-2021-44228 (10.0), -45046 (9.0), -45105 (5.9), -44832 (6.6), three branch ranges each | `cve_count: 4`, `max_cvss: 10`, `fixed_in: 2.17.1`, `latest_known_fix: 2.17.1`, `fully_remediated: true`, `unfixed_cve_ids: []`, `known_exploited: true`, per-CVE `fixed_in` CVE-2021-44228 2.15.0, CVE-2021-45046 2.16.0, CVE-2021-45105 2.17.0, CVE-2021-44832 2.17.1 |
 | `cpe:2.3:a:apache:log4j:2.12.1:...` | 200, same four CVEs | `fixed_in: 2.12.4` (branch fix), `latest_known_fix: 2.17.1`, `fully_remediated: true` |
 | `cpe:2.3:a:synth-checkout:synth-checkout:2.4.0:...` | 200, CVE-2099-0001 (7.5), `versionStartIncluding: 2.0.0` only | `cve_count: 1`, `fixed_in: null`, `fully_remediated: false`, `unfixed_cve_ids: [CVE-2099-0001]` |
 | `cpe:2.3:o:fortinet:fortios:7.2.4:...` | 200, CVE-2023-27997 (9.8), ranges [7.2.0, 7.2.5) and [7.0.0, 7.0.12) | `fixed_in: 7.2.5`; proves part `o` for appliance OS products |
@@ -540,7 +540,7 @@ from a workflow. Add optional plugin config and pass it through the step registr
 export const configSchema = schema.object({
   enabled: schema.boolean({ defaultValue: false }),
   enrichment: schema.object({
-    nvdUrl: schema.uri({ defaultValue: 'https://services.nvd.nist.gov/rest/json/cves/2.0' }),
+    nvdBaseUrl: schema.uri({ defaultValue: 'https://services.nvd.nist.gov/rest/json/cves/2.0' }),
     kevUrl: schema.uri({
       defaultValue: 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json',
     }),
@@ -551,7 +551,7 @@ export const configSchema = schema.object({
 });
 
 // server/services/enrichment/enrich_catalog_entries.ts
-export interface NvdEndpoints { nvdUrl: string; kevUrl: string; spacingMs?: number; timeoutMs: number; backoffBaseMs: number }
+export interface NvdEndpoints { nvdBaseUrl: string; kevUrl: string; spacingMs?: number; timeoutMs: number; backoffBaseMs: number }
 export const enrichCatalogEntries = async ({ esClient, logger, limit, fetchFn = fetch, endpoints = DEFAULT_ENDPOINTS }) => { ... };
 ```
 
@@ -560,7 +560,7 @@ Then `registerSoftwareInventorySteps` receives `config.enrichment` and passes it
 
 ```yaml
 xpack.softwareInventory.enrichment:
-  nvdUrl: http://localhost:5699/rest/json/cves/2.0
+  nvdBaseUrl: http://localhost:5699/rest/json/cves/2.0
   kevUrl: http://localhost:5699/kev.json
   requestSpacing: 100ms
   requestTimeout: 2s
@@ -617,7 +617,7 @@ change on a non-synthetic key fails the case.
 
 | ID | Objective | Setup | Trigger | Expected run and steps | Expected inventory | Panels |
 |---|---|---|---|---|---|---|
-| DO-1 | Baseline ingest | `R1` fixtures | variant | Run `completed`; all 16 steps `completed`; outputs as in [Osquery fixtures](#osquery-fixtures) | 13 instances `active`, `sources: [osquery]`; 13 `first_seen` events; 13 new catalog entries with categories `os_package` (6), `application` (4), `dependency` (3) | WH Runs +1; DO Events `first_seen` +13, Instances by source `osquery` +13, Catalog entries +13, Never checked +13 |
+| DO-1 | Baseline ingest | `R1` fixtures | variant | Run `completed`; all 12 steps `completed`; outputs as in [Osquery fixtures](#osquery-fixtures) | 13 instances `active`, `sources: [osquery]`; 13 `first_seen` events; 13 new catalog entries with categories `os_package` (6), `application` (4), `dependency` (3) | WH Runs +1; DO Events `first_seen` +13, Instances by source `osquery` +13, Catalog entries +13, Never checked +13 |
 | DO-2 | Blank and invalid rows | Within `R1` | | `ingest_windows.skipped = 1`; `ingest_linux.skipped = 0` (YAML drops blank rows before ingest) | No instance for `synth-lin-02` from Linux, none with name `(x64)` | |
 | DO-3 | Duplicate rows | Within `R1` | | `ingest_linux.created = 6` from 7 non-dropped rows | One `openssl` instance on `synth-lin-01` | |
 | DO-4 | Agent-id resolution fallback | `.fleet-agents` missing | | Kibana log: `could not resolve Osquery agent hosts; using agent names` | `synth-lin-01` instances: `host.id: synth-agent-lin01`, `host.name: synth-lin-01`; `synth-agent-lin03`: `host.key` = agent id, no `host.name`; `synth-win-01`: `host.name: SYNTH-WIN-01`, `host.key: synth-win-01` | |

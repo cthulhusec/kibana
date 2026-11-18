@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import moment from 'moment';
 import { loggingSystemMock } from '@kbn/core-logging-server-mocks';
 import { elasticsearchServiceMock } from '@kbn/core-elasticsearch-server-mocks';
 import type { WorkflowsExtensionsServerPluginSetup } from '@kbn/workflows-extensions/server';
@@ -17,7 +18,9 @@ import {
   STEP_SNAPSHOT_ROLLUP,
 } from '../../common/constants';
 import { ingestCandidatesStepCommonDefinition } from '../../common/step_definitions';
+import { enrichCatalogEntries } from '../services/enrichment/enrich_catalog_entries';
 import { createFakeEsClient } from '../services/ingest/fake_es_client';
+import type { RegisterStepsDeps } from './register_steps';
 import { registerSoftwareInventorySteps, toIngestInput } from './register_steps';
 
 jest.mock('../services/enrichment/enrich_catalog_entries', () => ({
@@ -42,6 +45,60 @@ describe('software inventory steps', () => {
       STEP_MARK_STALE,
       STEP_SNAPSHOT_ROLLUP,
     ]);
+  });
+
+  it('passes the enrichment overrides to the enrich step only when set', async () => {
+    const registerStepDefinition = jest.fn();
+    const register = (enrichment?: RegisterStepsDeps['enrichment']) =>
+      registerSoftwareInventorySteps({
+        workflowsExtensions: {
+          registerStepDefinition,
+        } as unknown as WorkflowsExtensionsServerPluginSetup,
+        getEsClient: async () => elasticsearchServiceMock.createElasticsearchClient(),
+        logger: loggingSystemMock.createLogger(),
+        enrichment,
+      });
+    const enrichMock = enrichCatalogEntries as jest.Mock;
+    enrichMock.mockResolvedValue({ checked: 0, updated: 0, failed: 0 });
+    const runEnrich = async () => {
+      const definition = registerStepDefinition.mock.calls
+        .map(([d]) => d)
+        .find(({ id }) => id === STEP_ENRICH_CVES);
+      await definition.handler({ input: { limit: 5 } });
+      return enrichMock.mock.calls[enrichMock.mock.calls.length - 1][0];
+    };
+
+    register();
+    expect(await runEnrich()).not.toHaveProperty('nvdBaseUrl');
+    expect(await runEnrich()).not.toHaveProperty('kevUrl');
+
+    registerStepDefinition.mockClear();
+    register({ nvdBaseUrl: 'http://127.0.0.1:1/n', kevUrl: 'http://127.0.0.1:1/k' });
+    expect(await runEnrich()).toMatchObject({
+      limit: 5,
+      nvdBaseUrl: 'http://127.0.0.1:1/n',
+      kevUrl: 'http://127.0.0.1:1/k',
+    });
+
+    registerStepDefinition.mockClear();
+    register({
+      requestSpacing: moment.duration(0),
+      requestTimeout: moment.duration(250),
+      backoffBase: moment.duration(50),
+    });
+    const timing = await runEnrich();
+    expect(timing).toMatchObject({
+      requestSpacingMs: 0,
+      requestTimeoutMs: 250,
+      backoffBaseMs: 50,
+    });
+
+    registerStepDefinition.mockClear();
+    register({});
+    const unset = await runEnrich();
+    expect(unset).not.toHaveProperty('requestSpacingMs');
+    expect(unset).not.toHaveProperty('requestTimeoutMs');
+    expect(unset).not.toHaveProperty('backoffBaseMs');
   });
 
   it('accepts null row fields and drops them before ingest', () => {
