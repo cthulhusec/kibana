@@ -96,11 +96,11 @@ const discoverLogsEngine = (
 /** Instances, catalog categories, exact events, and the no-stray-writes check of one stage. */
 const checkStageInventory = async (
   ctx: CaseContext,
-  { stage, since }: { stage: DlStage; since: string }
+  { stage, since, afterFlipRun = false }: { stage: DlStage; since: string; afterFlipRun?: boolean }
 ): Promise<LayerResult> => {
   const { es, t0 } = ctx;
   return mergeLayer('inventory', [
-    await checkInstances(es, expectedInstancesAt(stage)),
+    await checkInstances(es, expectedInstancesAt(stage, { afterFlipRun })),
     await checkCatalogEntries(
       es,
       expectedCatalogAt(stage).map(({ id, category }) => ({ id, fields: { category } }))
@@ -297,7 +297,8 @@ const flipHistory = async (ctx: CaseContext): Promise<LayerResult> => {
 
 const runStageB = async (
   ctx: CaseContext,
-  ingest: Parameters<typeof checkDiscoverLogsSteps>[1]['ingest']
+  ingest: Parameters<typeof checkDiscoverLogsSteps>[1]['ingest'],
+  { afterFlipRun = false }: { afterFlipRun?: boolean } = {}
 ): Promise<CaseResult> => {
   const since = new Date().toISOString();
   const run = await ctx.runWorkflow({ workflow: 'discoverLogs' });
@@ -309,7 +310,7 @@ const runStageB = async (
     candidateCount: candidatesAt('B').length,
   });
   const inventory = mergeLayer('inventory', [
-    await checkStageInventory(ctx, { stage: 'B', since }),
+    await checkStageInventory(ctx, { stage: 'B', since, afterFlipRun }),
     await flipHistory(ctx),
     await checkSightingTimes(ctx.es, { stage: 'B', t0: ctx.t0, hostKeys: [FLIP_HOST_KEY] }),
   ]);
@@ -327,7 +328,8 @@ const dl7: TestCase['run'] = async (ctx) => {
 const dl8: TestCase['run'] = async (ctx) => {
   const blocked = staleGuard(ctx);
   if (blocked) return blocked;
-  return runStageB(ctx, DL_INGEST.idempotent);
+  // DL-7 left the flipped instance `patched`; an unchanged re-run returns it to `active`.
+  return runStageB(ctx, DL_INGEST.idempotent, { afterFlipRun: true });
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -353,7 +355,7 @@ const dl9: TestCase['run'] = async (ctx) => {
       candidateCount: serviceRowsAt(stage, ctx.t0).length,
     });
     // Nothing changes: the services are already ingested, and appliances are not re-read.
-    const inventory = await checkStageInventory(ctx, { stage, since });
+    const inventory = await checkStageInventory(ctx, { stage, since, afterFlipRun: true });
     result = caseResult(
       [engine, step, inventory],
       [
@@ -436,7 +438,8 @@ const dl10: TestCase['run'] = async (ctx) => {
   ];
   const inventory = mergeLayer('inventory', [
     await checkInstances(ctx.es, [
-      ...expectedInstancesAt(stage),
+      // DL-8 already re-ran phase B, so the flipped instance is back to `active`.
+      ...expectedInstancesAt(stage, { afterFlipRun: true }),
       {
         hostKey: hostId,
         catalogId: MULTI_VALUED_CATALOG_ID,

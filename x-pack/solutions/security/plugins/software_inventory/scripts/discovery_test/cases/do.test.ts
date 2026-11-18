@@ -33,6 +33,7 @@ import {
   SYNTH_TOOL,
   osqueryInstance,
 } from '../expected/do';
+import { HttpError } from '../clients';
 import { AGENTS } from '../fixtures/osquery';
 import { instanceIdFor } from '../ids';
 import { ALL_CASES, validateRegistry } from '.';
@@ -640,5 +641,37 @@ describe('DO-18', () => {
   it('fails when a query step completes', async () => {
     const { ctx } = fakeContext({ runs: [prodRun('completed')], world: emptyWorld });
     expect((await caseOf('DO-18').run(ctx)).status).toBe('fail');
+  });
+
+  it('is blocked, with the flag to set, when osquery.runQuery is not a registered step type', async () => {
+    const body = JSON.stringify({
+      message: 'Workflow validation failed',
+      attributes: {
+        validationErrors: ['Invalid step type. (at step "query_linux" › type)'],
+      },
+    });
+    const { ctx } = fakeContext({
+      runs: [
+        () => {
+          throw new HttpError('POST', 'http://kibana/api/workflows/test', 400, body);
+        },
+      ],
+      world: emptyWorld,
+    });
+    const result = await caseOf('DO-18').run(ctx);
+    expect(result.status).toBe('blocked');
+    expect((result.notes ?? []).join(' ')).toMatch(/workflowsExtensionsEnabled/);
+  });
+
+  it('does not swallow other validation errors as blocked', async () => {
+    const { ctx } = fakeContext({
+      runs: [
+        () => {
+          throw new HttpError('POST', 'http://kibana/api/workflows/test', 400, 'Invalid trigger');
+        },
+      ],
+      world: emptyWorld,
+    });
+    await expect(caseOf('DO-18').run(ctx)).rejects.toThrow(/Invalid trigger/);
   });
 });

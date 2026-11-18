@@ -28,7 +28,7 @@ import {
   mergeLayer,
 } from '../assertions';
 import type { CompletedRun } from '../clients';
-import { toCompletedRun } from '../clients';
+import { HttpError, toCompletedRun } from '../clients';
 import {
   BULK_HOST_KEY,
   BULK_LIMIT,
@@ -489,6 +489,19 @@ const DO18_EXPECTATION: OsqueryRunExpectation = {
   failedQueries: QUERY_KEYS,
 };
 
+const OSQUERY_STEPS_UNAVAILABLE =
+  'The osquery.runQuery step type is not registered on this stack, so the production discover-osquery ' +
+  'YAML cannot be validated or run. Set `xpack.osquery.enableExperimental: [workflowsExtensionsEnabled]` ' +
+  'in config/kibana.dev.yml and restart Kibana to run this case. The mocked variants (DO-1..DO-17) ' +
+  'do not need it because they replace the query steps.';
+
+/** True for the 400 the test route returns when a workflow uses an unregistered osquery step. */
+const isUnknownOsqueryStepError = (error: unknown): boolean =>
+  error instanceof HttpError &&
+  error.status === 400 &&
+  /Invalid step type/.test(error.body) &&
+  /query_(linux|windows|macos|dependencies)/.test(error.body);
+
 const do18: TestCase['run'] = async (ctx) => {
   if (await ctx.es.exists(FLEET_AGENTS_PATH)) {
     return blockedResult(
@@ -496,7 +509,17 @@ const do18: TestCase['run'] = async (ctx) => {
     );
   }
   const since = new Date().toISOString();
-  const run = await ctx.runWorkflow({ workflow: 'discoverOsquery' });
+  let run: CompletedRun;
+  try {
+    run = await ctx.runWorkflow({ workflow: 'discoverOsquery' });
+  } catch (error) {
+    // The Osquery workflow steps are registered only behind an experimental flag (shipped dark), so
+    // without it the production YAML fails validation before it can run at all.
+    if (isUnknownOsqueryStepError(error)) {
+      return blockedResult(OSQUERY_STEPS_UNAVAILABLE);
+    }
+    throw error;
+  }
   const { engine, step } = await checkOsqueryRun(run, DO18_EXPECTATION);
   const errors = Object.fromEntries(
     await Promise.all(

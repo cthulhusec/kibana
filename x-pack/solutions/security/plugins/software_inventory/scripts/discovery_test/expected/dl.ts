@@ -85,15 +85,22 @@ const isFlip = ({ hostKey }: ExpectedLogCandidate): boolean => hostKey === FLIP_
 
 const versionOfCatalogId = (catalogId: string): string => parseCatalogId(catalogId).version;
 
-/** Expected instances after the run at `stage`, for `checkInstances`. */
-export const expectedInstancesAt = (stage: DlStage): ExpectedInstance[] =>
+/**
+ * Expected instances after the run at `stage`, for `checkInstances`. The run that flips a version
+ * leaves the instance `patched`; the next run that sees it unchanged returns it to `active` and
+ * keeps the previous-version link and the history. Pass `afterFlipRun` for runs after the flip.
+ */
+export const expectedInstancesAt = (
+  stage: DlStage,
+  { afterFlipRun = false }: { afterFlipRun?: boolean } = {}
+): ExpectedInstance[] =>
   [...dedupeRows(candidatesAt(stage)).values()].map((row) => {
     const shared = isSharedWithOsquery(row);
     const flipped = stage === 'B' && isFlip(row);
     return {
       hostKey: row.hostKey,
       catalogId: row.catalogId,
-      status: flipped ? 'patched' : 'active',
+      status: flipped && !afterFlipRun ? 'patched' : 'active',
       sources: shared ? ['osquery', 'logs'] : ['logs'],
       hostName: row.host_name ?? null,
       // The Osquery run reports its own agent id and a different version spelling.
@@ -164,14 +171,20 @@ export const expectedSightingTimes = (
     return { hostKey: row.hostKey, catalogId: row.catalogId, firstSeen, lastSeen };
   });
 
-/** Catalog entries a run creates, with the category the ingest step assigns. */
+/**
+ * Catalog entries a run creates or touches, with the category each ends up with. A catalog entry
+ * keeps the category of whichever source created it first. DO-1 creates the shared nginx entry
+ * from a Debian package row, so it stays `os_package` even though the logs describe it as an
+ * `application`; every other entry is created by the logs themselves.
+ */
 export const expectedCatalogAt = (
   stage: DlStage
-): ReadonlyArray<{ id: string; category: ExpectedLogCandidate['category'] }> => {
-  const seen = new Map<string, ExpectedLogCandidate['category']>();
+): ReadonlyArray<{ id: string; category: ExpectedLogCandidate['category'] | 'os_package' }> => {
+  const seen = new Map<string, ExpectedLogCandidate['category'] | 'os_package'>();
   for (const { catalogId, category } of candidatesAt(stage)) {
-    // DO-1 created the shared nginx entry first, as `application`; the logs use the same category.
-    if (!seen.has(catalogId)) seen.set(catalogId, category);
+    if (!seen.has(catalogId)) {
+      seen.set(catalogId, catalogId === SHARED_CATALOG_ID ? 'os_package' : category);
+    }
   }
   return [...seen.entries()].map(([id, category]) => ({ id, category }));
 };

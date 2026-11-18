@@ -95,15 +95,16 @@ export const seedDlState = (
   stack: FakeStack,
   stage: DlStage,
   t0: Date,
-  { writtenAt }: { writtenAt?: string } = {}
+  { writtenAt, afterFlipRun = false }: { writtenAt?: string; afterFlipRun?: boolean } = {}
 ): void => {
   const times = expectedSightingTimes(stage, t0);
   const flipFirstSeen = new Date(t0.getTime() - 20 * 3_600_000).toISOString();
-  for (const expected of expectedInstancesAt(stage)) {
+  for (const expected of expectedInstancesAt(stage, { afterFlipRun })) {
     const sighting = times.find(
       ({ hostKey, catalogId }) => hostKey === expected.hostKey && catalogId === expected.catalogId
     );
-    const flipped = expected.status === 'patched';
+    // The flipped instance keeps its previous-version link and history after it returns to active.
+    const flipped = expected.previousSoftwareId !== undefined;
     instanceDoc(stack, {
       hostKey: expected.hostKey,
       catalogId: expected.catalogId,

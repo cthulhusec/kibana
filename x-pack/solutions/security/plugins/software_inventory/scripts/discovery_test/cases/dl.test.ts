@@ -398,7 +398,7 @@ describe('DL-7 and DL-8 (phase B)', () => {
 
   it('DL-8 passes with unchanged output and no new events', async () => {
     const stack = buildFakeStack();
-    seedDlState(stack, 'B', T0);
+    seedDlState(stack, 'B', T0, { afterFlipRun: true });
     const { result } = await run(stack, 'DL-8', () =>
       discoverLogsRun(stack, stageShape('B', DL_INGEST.idempotent))
     );
@@ -408,7 +408,7 @@ describe('DL-7 and DL-8 (phase B)', () => {
 
   it('DL-8 fails on an extra event', async () => {
     const stack = buildFakeStack();
-    seedDlState(stack, 'B', T0);
+    seedDlState(stack, 'B', T0, { afterFlipRun: true });
     const [first] = expectedEventsAt('B', T0);
     putEvent(stack, {
       ...first,
@@ -433,7 +433,7 @@ describe('DL-9', () => {
 
   it('runs without the template and serial docs, passes, then restores the logs', async () => {
     const stack = buildFakeStack();
-    seedDlState(stack, 'B', T0);
+    seedDlState(stack, 'B', T0, { afterFlipRun: true });
     seedLogs(stack);
     let seenAtRun: { template: boolean; serialDocs: number } | undefined;
     const { result } = await run(stack, 'DL-9', () => {
@@ -463,7 +463,7 @@ describe('DL-9', () => {
 
   it('restores the logs even when the run throws', async () => {
     const stack = buildFakeStack();
-    seedDlState(stack, 'B', T0);
+    seedDlState(stack, 'B', T0, { afterFlipRun: true });
     seedLogs(stack);
     const { ctx } = stack.buildContext({
       t0: T0,
@@ -478,7 +478,7 @@ describe('DL-9', () => {
 
   it('fails when the appliance query still succeeds', async () => {
     const stack = buildFakeStack();
-    seedDlState(stack, 'B', T0);
+    seedDlState(stack, 'B', T0, { afterFlipRun: true });
     seedLogs(stack);
     const { result } = await run(stack, 'DL-9', () =>
       discoverLogsRun(stack, stageShape('B', DL_INGEST.idempotent))
@@ -524,7 +524,7 @@ describe('DL-10', () => {
 
   it('writes the multi-valued doc and records the sorted-first value', async () => {
     const stack = buildFakeStack();
-    seedDlState(stack, 'B', T0);
+    seedDlState(stack, 'B', T0, { afterFlipRun: true });
     const { ctx } = stack.buildContext({
       t0: T0,
       runWorkflow: () => multiValuedRun(stack, '10.9.9.9'),
@@ -539,7 +539,7 @@ describe('DL-10', () => {
 
   it('passes with a note when the other value comes first, and fails on any third value', async () => {
     const stack = buildFakeStack();
-    seedDlState(stack, 'B', T0);
+    seedDlState(stack, 'B', T0, { afterFlipRun: true });
     const other = stack.buildContext({
       t0: T0,
       runWorkflow: () => multiValuedRun(stack, '192.0.2.78'),
