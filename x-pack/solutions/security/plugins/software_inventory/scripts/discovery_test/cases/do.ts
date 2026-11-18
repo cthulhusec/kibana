@@ -67,7 +67,7 @@ import {
 } from '../logs/generate_logs';
 import type { OsqueryFixture, OsqueryRow } from '../fixtures/osquery';
 import { AGENTS, F_BULK_5000, F_BULK_5001, successOutput } from '../fixtures/osquery';
-import { instanceIdFor } from '../ids';
+import { instanceIdFor, isSyntheticHostKey } from '../ids';
 import { buildOsqueryVariant } from '../variants/osquery';
 import { getWorkflowId } from '../variants/build_variant';
 import {
@@ -221,6 +221,22 @@ const logsWritableHostKeys = (): string[] => [
   ]),
 ];
 
+/**
+ * Synthetic hosts that already have a logs-sourced instance. The production `discover-logs` run
+ * re-reads the whole synthetic stream, so after the DL cases it also touches hosts the DO-15
+ * documents never mention (for example DL-10's multi-valued appliance). That is expected.
+ */
+const syntheticLogsHostKeys = async (es: CaseContext['es']): Promise<string[]> => {
+  const response = await es.search<{ host: { key: string } }>(INSTANCES_INDEX, {
+    size: 1000,
+    _source: ['host.key'],
+    query: { term: { sources: 'logs' } },
+  });
+  return response.hits.hits
+    .flatMap((hit) => (hit._source ? [hit._source.host.key] : []))
+    .filter(isSyntheticHostKey);
+};
+
 /** 24 h look-back of the log queries plus a 1 h margin. */
 const LOGS_EVENT_LOOKBACK_MS = 25 * 60 * 60 * 1000;
 
@@ -243,7 +259,9 @@ const do15: TestCase['run'] = async (ctx) => {
   const engines: LayerResult[] = [];
   const steps: LayerResult[] = [];
   const inventories: LayerResult[] = [];
-  const allowed = logsWritableHostKeys();
+  const allowed = [
+    ...new Set([...logsWritableHostKeys(), ...(await syntheticLogsHostKeys(ctx.es))]),
+  ];
   const serviceInstance = (sources: Array<'logs' | 'osquery'>) => ({
     ...ref,
     status: 'active' as const,
