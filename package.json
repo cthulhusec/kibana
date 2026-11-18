@@ -1291,6 +1291,7 @@
     "@kbn/slo-schema": "workspace:*",
     "@kbn/slo-shared-plugin": "workspace:*",
     "@kbn/snapshot-restore-plugin": "workspace:*",
+    "@kbn/software-inventory-plugin": "workspace:*",
     "@kbn/sort-predicates": "workspace:*",
     "@kbn/spaces-plugin": "workspace:*",
     "@kbn/spaces-test-plugin": "workspace:*",

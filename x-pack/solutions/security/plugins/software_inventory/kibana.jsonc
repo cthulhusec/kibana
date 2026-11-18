@@ -1,0 +1,17 @@
+{
+  "type": "plugin",
+  "id": "@kbn/software-inventory-plugin",
+  "owner": ["@elastic/security-solution"],
+  "group": "security",
+  "visibility": "private",
+  "description": "POC: software and technology inventory with CVE and exposure enrichment",
+  "plugin": {
+    "id": "softwareInventory",
+    "browser": true,
+    "server": true,
+    "configPath": ["xpack", "softwareInventory"],
+    "requiredPlugins": ["features", "workflowsExtensions", "workflowsManagement", "taskManager"],
+    "optionalPlugins": ["security", "agentBuilder", "fleet", "spaces", "osquery"],
+    "requiredBundles": ["kibanaReact"]
+  }
+}

@@ -3802,6 +3802,9 @@ importers:
       '@kbn/snapshot-restore-plugin':
         specifier: workspace:*
         version: link:x-pack/platform/plugins/private/snapshot_restore
+      '@kbn/software-inventory-plugin':
+        specifier: workspace:*
+        version: link:x-pack/solutions/security/plugins/software_inventory
       '@kbn/sort-predicates':
         specifier: workspace:*
         version: link:src/platform/packages/shared/kbn-sort-predicates
@@ -10021,6 +10024,8 @@ importers:
   x-pack/solutions/security/plugins/security_solution_serverless: {}
 
   x-pack/solutions/security/plugins/session_view: {}
+
+  x-pack/solutions/security/plugins/software_inventory: {}
 
   x-pack/solutions/security/plugins/timelines: {}
 

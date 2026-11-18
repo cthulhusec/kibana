@@ -1741,6 +1741,7 @@ packages:
   - 'x-pack/solutions/security/plugins/security_solution_ess'
   - 'x-pack/solutions/security/plugins/security_solution_serverless'
   - 'x-pack/solutions/security/plugins/session_view'
+  - 'x-pack/solutions/security/plugins/software_inventory'
   - 'x-pack/solutions/security/plugins/timelines'
   - 'x-pack/solutions/security/test'
   - 'x-pack/solutions/security/test/security_solution_api_integration'
