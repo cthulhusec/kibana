@@ -101,6 +101,20 @@ describe('software inventory steps', () => {
     expect(unset).not.toHaveProperty('backoffBaseMs');
   });
 
+  it('rejects a batch over the candidate limit with an error that names the limit', () => {
+    const candidates = Array.from({ length: MAX_CANDIDATES_PER_CALL + 1 }, (_, index) => ({
+      host_id: 'h1',
+      name: `pkg-${index}`,
+    }));
+    expect(() => toIngestInput({ source: 'osquery', snapshot: false, candidates })).toThrow(
+      /Too many candidates: received 5001, the limit is 5000/
+    );
+    expect(
+      toIngestInput({ source: 'osquery', snapshot: false, candidates: candidates.slice(0, -1) })
+        .input.candidates
+    ).toHaveLength(MAX_CANDIDATES_PER_CALL);
+  });
+
   it('accepts null row fields and drops them before ingest', () => {
     const parsed = ingestCandidatesStepCommonDefinition.inputSchema.parse({
       source: 'osquery',

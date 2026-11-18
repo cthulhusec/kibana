@@ -21,6 +21,7 @@ import {
   type IngestCandidatesStepInput,
   type RawCandidateStepRow,
 } from '../../common/step_definitions';
+import { MAX_CANDIDATES_PER_CALL } from '../../common/constants';
 import type { IngestCandidatesInput, RawCandidate } from '../../common/types';
 import { ingestCandidates, markStale } from '../services/ingest';
 import { enrichCatalogEntries } from '../services/enrichment/enrich_catalog_entries';
@@ -60,6 +61,13 @@ export const toIngestInput = ({
   snapshot,
   candidates,
 }: IngestCandidatesStepInput): { input: IngestCandidatesInput; invalid: number } => {
+  // The step's input schema declares this bound, but the workflow engine does not enforce a step
+  // input schema's array limit at run time, so the handler enforces it itself.
+  if (candidates.length > MAX_CANDIDATES_PER_CALL) {
+    throw new Error(
+      `Too many candidates: received ${candidates.length}, the limit is ${MAX_CANDIDATES_PER_CALL} candidates per call. Split the rows across several calls.`
+    );
+  }
   const valid = candidates.flatMap((row) => {
     const parsed = rawCandidateSchema.safeParse(row);
     return parsed.success ? [toRawCandidate(parsed.data)] : [];
