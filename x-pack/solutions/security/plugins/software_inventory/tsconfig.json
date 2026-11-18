@@ -27,6 +27,7 @@
     "@kbn/core-spaces-common",
     "@kbn/ui-callout",
     "@kbn/datemath",
-    "@kbn/charts-theme"
+    "@kbn/charts-theme",
+    "@kbn/osquery-plugin"
   ]
 }
