@@ -221,6 +221,9 @@ const logsWritableHostKeys = (): string[] => [
   ]),
 ];
 
+/** 24 h look-back of the log queries plus a 1 h margin. */
+const LOGS_EVENT_LOOKBACK_MS = 25 * 60 * 60 * 1000;
+
 const do15: TestCase['run'] = async (ctx) => {
   const ref = { hostKey: DO15_HOST.hostKey, catalogId: DO15_CATALOG_ID };
   const logTime = ctx.t0.getTime() - HOUR_MS;
@@ -280,7 +283,10 @@ const do15: TestCase['run'] = async (ctx) => {
         await categoryCheck(),
         await checkEvents(ctx.es, {
           hostKeys: [DO15_HOST.hostKey],
-          since,
+          // The event carries the log's observed time, before this case started, so look back 25 h.
+          since: new Date(ctx.t0.getTime() - LOGS_EVENT_LOOKBACK_MS).toISOString(),
+          // The host also carries events from the Osquery cases; assert only this case's software.
+          softwareIds: [DO15_CATALOG_ID],
           expected: [
             {
               type: 'first_seen',

@@ -441,6 +441,9 @@ export const summarizeBulk = (response: BulkResponse): BulkSummary => {
   return { total: response.items.length, failed, conflicts, ...(firstError ? { firstError } : {}) };
 };
 
+/** Indices the plugin writes without waiting for a refresh, so a read right after a run can miss them. */
+const PLUGIN_INDEX_PREFIX = '.kibana-software-inventory-';
+
 export const createEsClient = (options: EsClientOptions) => {
   const request = createRequester(
     options.esUrl.replace(/\/+$/, ''),
@@ -448,16 +451,29 @@ export const createEsClient = (options: EsClientOptions) => {
     options.fetchFn ?? fetch
   );
 
+  // Search is near-real-time: a bulk write that did not wait for a refresh is invisible to a search
+  // for up to a second, which made cases that read right after a workflow run flaky. Refresh the
+  // plugin's own indices before reading them.
+  const refreshPluginIndex = async (index: string): Promise<void> => {
+    if (!index.startsWith(PLUGIN_INDEX_PREFIX)) return;
+    await request('POST', `/${index}/_refresh`, {
+      query: { ignore_unavailable: true, allow_no_indices: true },
+    });
+  };
+
   return {
     request,
-    search: async <T>(index: string, body: object): Promise<SearchResponse<T>> =>
-      (
+    search: async <T>(index: string, body: object): Promise<SearchResponse<T>> => {
+      await refreshPluginIndex(index);
+      return (
         await request<SearchResponse<T>>('POST', `/${index}/_search`, {
           body,
           query: { ignore_unavailable: true, allow_no_indices: true },
         })
-      ).body,
+      ).body;
+    },
     count: async (index: string, query?: object): Promise<number> => {
+      await refreshPluginIndex(index);
       const { body } = await request<{ count: number }>('POST', `/${index}/_count`, {
         body: query ? { query } : {},
         query: { ignore_unavailable: true, allow_no_indices: true },

@@ -116,6 +116,9 @@ export const readE2e1Capture = (
   };
 };
 
+/** 24 h look-back of the log queries plus a 1 h margin. */
+const EVENT_LOOKBACK_MS = 25 * 60 * 60 * 1000;
+
 const NO_CAPTURE_REASON =
   'E2E-1 recorded no pipeline capture (run E2E-1 in this invocation or keep its passing record).';
 
@@ -243,11 +246,14 @@ const e2e1 =
     step.push(await checkSteps(seRun, { score: { output: { scored } } }));
 
     const instances = await ctx.es.count(INSTANCES_INDEX, syntheticHostKeyQuery());
+    // Events from the logs carry the log's observed time, up to 24 h before T0, so the window
+    // opens 25 h before T0 (the plan's margin) and not at T0.
+    const eventsFrom = new Date(t0.getTime() - EVENT_LOOKBACK_MS).toISOString();
     const events = await ctx.es.search<InventoryEvent>(EVENTS_INDEX, {
       size: 10_000,
       query: {
         bool: {
-          filter: [syntheticHostKeyQuery(), { range: { '@timestamp': { gte: startedAt } } }],
+          filter: [syntheticHostKeyQuery(), { range: { '@timestamp': { gte: eventsFrom } } }],
         },
       },
     });
@@ -430,9 +436,10 @@ const e2e3 =
   async (ctx: CaseContext): Promise<CaseResult> => {
     const capture = readE2e1Capture(ctx);
     if (!capture) return blockedResult(NO_CAPTURE_REASON);
+    // Events from the logs carry the log's observed time, before T0, so look back 25 h.
     const patchEvents = await findEvents(ctx.es, {
       hostKeys: [E2E2_HOST],
-      since: capture.startedAt,
+      since: new Date(Date.parse(capture.startedAt) - EVENT_LOOKBACK_MS).toISOString(),
       types: ['version_changed'],
     });
     const posture = layerResult(
@@ -469,7 +476,7 @@ const e2e3 =
     });
     const repeatEvents = await findEvents(ctx.es, {
       hostKeys: [E2E3_REPEAT.hostKey],
-      since: repeatStart,
+      since: new Date(Date.parse(repeatStart) - EVENT_LOOKBACK_MS).toISOString(),
       types: ['version_changed'],
     });
     const noPosture = layerResult(

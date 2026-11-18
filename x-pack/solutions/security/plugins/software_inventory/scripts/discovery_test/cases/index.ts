@@ -17,12 +17,21 @@ import { cases as regression } from './rg';
 import type { CaseFamily, TestCase } from './types';
 import { CASE_FAMILIES } from './types';
 
+/**
+ * DO-15..DO-18 run after the log cases, as the plan's runbook orders them: DO-15 writes synthetic
+ * logs, and DL-0 needs a cluster without any. The numeric suffix of the id decides.
+ */
+const LATE_OSQUERY_CASE_FROM = 15;
+const isLateOsqueryCase = ({ id }: TestCase): boolean =>
+  Number(id.split('-')[1]) >= LATE_OSQUERY_CASE_FROM;
+
 /** Every registered case, in the plan's execution order (families in this order, then file order). */
 export const ALL_CASES: readonly TestCase[] = [
   ...t0,
-  ...discoverOsquery,
+  ...discoverOsquery.filter((testCase) => !isLateOsqueryCase(testCase)),
   ...discoverIntegrations,
   ...discoverLogs,
+  ...discoverOsquery.filter(isLateOsqueryCase),
   ...enrichCves,
   ...scoreExposure,
   ...endToEnd,
@@ -51,7 +60,7 @@ export const validateRegistry = (registry: readonly TestCase[]): void => {
 };
 
 /**
- * Resolves a selector: `all`, a family (`DO`), case ids (`DO-1`), or a comma-separated mix. Keeps
+ * Resolves a selector: `all` (every family except RG), a family (`DO`), case ids (`DO-1`), or a comma-separated mix. Keeps
  * registry order and drops duplicates; throws on an unknown selector.
  */
 export const selectCases = (
@@ -67,7 +76,9 @@ export const selectCases = (
   for (const token of tokens) {
     const upper = token.toUpperCase();
     if (upper === 'ALL') {
-      registry.forEach((testCase) => selected.add(testCase));
+      // The RG family checks the stack after cleanup and restore, so `all` leaves it out: run the
+      // `regression` command (cleanup, restore, then RG) as the last step.
+      registry.filter(({ family }) => family !== 'RG').forEach((testCase) => selected.add(testCase));
       continue;
     }
     if ((CASE_FAMILIES as readonly string[]).includes(upper)) {

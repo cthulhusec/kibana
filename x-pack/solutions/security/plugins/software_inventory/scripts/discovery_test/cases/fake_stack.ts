@@ -222,6 +222,8 @@ export const buildFakeStack = (): FakeStack => {
     }
     const [name, action, id] = parts;
     const store = index(name);
+    // Every write is visible to the next read in this fake, so a refresh has nothing to do.
+    if (action === '_refresh' && method === 'POST') return json({ _shards: { failed: 0 } });
     if (action === '_search') {
       const request = JSON.parse(body || '{}') as Doc;
       let hits = [...store.entries()]

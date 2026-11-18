@@ -7,7 +7,7 @@
 
 import type { JsonValue, RawResponse, SearchResponse } from '../clients';
 import { SC1, SC3, SC_COPY_IDS } from '../expected/sc';
-import { createScCases } from './sc';
+import { createScCases, isActiveStatus } from './sc';
 import type { Clock, ExecutionDoc } from './sc_support';
 import { evaluateDropRuns, evaluateScheduledRuns, pollUntil } from './sc_support';
 import { TEST_CONFIG, fakeContext, fakeEs, fakeKibana, fakeRun } from './fake_context';
@@ -93,6 +93,20 @@ describe('evaluateDropRuns', () => {
       'holder h ran 29000ms, less than the 90000ms wait',
       `skipped run s has startedAt ${at(21)}`,
     ]);
+  });
+});
+
+describe('isActiveStatus', () => {
+  it('treats running and waiting runs as holding a concurrency slot', () => {
+    expect(isActiveStatus('running')).toBe(true);
+    // The live engine reports `waiting` while a wait step sleeps.
+    expect(isActiveStatus('waiting')).toBe(true);
+  });
+
+  it('does not treat pending, finished, or unknown statuses as holding the slot', () => {
+    for (const status of ['pending', 'completed', 'failed', 'skipped', 'cancelled', undefined]) {
+      expect(isActiveStatus(status)).toBe(false);
+    }
   });
 });
 

@@ -202,6 +202,14 @@ interface HolderOutcome {
   readonly error?: Error;
 }
 
+/**
+ * A run that holds its concurrency slot is `running` while a step executes and `waiting` while a
+ * `wait` step sleeps (observed on the live engine), so the holder check accepts both.
+ */
+const ACTIVE_RUN_STATUSES: readonly string[] = ['running', 'waiting'];
+export const isActiveStatus = (status: string | undefined): boolean =>
+  status !== undefined && ACTIVE_RUN_STATUSES.includes(status);
+
 const sc4 =
   (clock: Clock) =>
   async (ctx: CaseContext): Promise<CaseResult> => {
@@ -223,7 +231,7 @@ const sc4 =
     const { timedOut } = await pollUntil(
       () => listExecutions(ctx.es, { workflowId: managedId, since }),
       (runs: ExecutionDoc[]) =>
-        runs.some((run) => run.startedAt !== undefined && run.status === 'running'),
+        runs.some((run) => run.startedAt !== undefined && isActiveStatus(run.status)),
       { timeoutMs: SC4.holderStartTimeoutMs, intervalMs: 1000 },
       clock
     );
@@ -233,7 +241,7 @@ const sc4 =
         layerResult(
           'engine',
           [
-            `the holder never reached "running" (${
+            `the holder never reached "running" or "waiting" (${
               settled.error?.message ?? settled.run?.execution.status
             })`,
           ],

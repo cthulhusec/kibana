@@ -344,14 +344,23 @@ export const checkCatalogEntries = async (
   return layerResult('inventory', diffs, expected.length);
 };
 
-/** Events with `@timestamp >= since` on the given host keys, oldest first. */
+/**
+ * Events with `@timestamp >= since` on the given host keys, oldest first. `types` and
+ * `softwareIds` narrow them further, for a case that shares a host with other cases.
+ */
 export const findEvents = async (
   es: EsClient,
   {
     hostKeys,
     since,
     types,
-  }: { hostKeys: readonly string[]; since: string; types?: readonly string[] }
+    softwareIds,
+  }: {
+    hostKeys: readonly string[];
+    since: string;
+    types?: readonly string[];
+    softwareIds?: readonly string[];
+  }
 ): Promise<InventoryEvent[]> => {
   const response = await es.search<InventoryEvent>(EVENTS_INDEX, {
     size: 10_000,
@@ -362,6 +371,7 @@ export const findEvents = async (
           { terms: { 'host.key': hostKeys } },
           { range: { '@timestamp': { gte: since } } },
           ...(types ? [{ terms: { type: types } }] : []),
+          ...(softwareIds ? [{ terms: { software_id: softwareIds } }] : []),
         ],
       },
     },
@@ -401,7 +411,12 @@ export const diffEvents = (
 /** Asserts the exact set of events written on `hostKeys` since `since`. */
 export const checkEvents = async (
   es: EsClient,
-  args: { hostKeys: readonly string[]; since: string; expected: readonly ExpectedEvent[] }
+  args: {
+    hostKeys: readonly string[];
+    since: string;
+    expected: readonly ExpectedEvent[];
+    softwareIds?: readonly string[];
+  }
 ): Promise<LayerResult> => {
   const actual = await findEvents(es, args);
   return layerResult(

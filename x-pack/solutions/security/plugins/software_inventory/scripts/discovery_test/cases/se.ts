@@ -47,6 +47,7 @@ import {
   computeRollupOracle,
   dayEndOf,
   dayStartOf,
+  diffRollupAgainstOracle,
 } from '../expected/se';
 import { F_EMPTY, R1, R1_MACOS_ROWS } from '../fixtures/osquery';
 import { getWorkflowId } from '../variants/build_variant';
@@ -332,7 +333,7 @@ const se11: TestCase['run'] = async (ctx) => {
     ...(inputs.truncated ? ['oracle read hit the 10000 document limit'] : []),
     ...(!stored.found || !stored._source
       ? [`no rollup document with _id ${date}`]
-      : diffValues(expected, stored._source, `rollup ${date}`)),
+      : diffRollupAgainstOracle(expected, stored._source, `rollup ${date}`)),
   ];
   const stepOutput = await checkSteps(run, {
     snapshot_rollup: {

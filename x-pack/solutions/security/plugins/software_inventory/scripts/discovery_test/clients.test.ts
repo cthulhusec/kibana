@@ -168,6 +168,32 @@ describe('es client', () => {
     expect(calls[0].headers['content-type']).toBe('application/x-ndjson');
   });
 
+  it('refreshes a plugin index before a search or count, so a read after a run sees the writes', async () => {
+    const { fetchFn, calls } = fakeFetch([
+      { body: { _shards: {} } },
+      { body: { hits: { hits: [] } } },
+      { body: { _shards: {} } },
+      { body: { count: 3 } },
+    ]);
+    const es = createEsClient({ ...credentials, esUrl: 'http://es/', fetchFn });
+    await es.search('.kibana-software-inventory-catalog', { query: { match_all: {} } });
+    expect(await es.count('.kibana-software-inventory-events')).toBe(3);
+    expect(calls.map(({ url }) => url.replace(/\?.*/, ''))).toEqual([
+      'http://es/.kibana-software-inventory-catalog/_refresh',
+      'http://es/.kibana-software-inventory-catalog/_search',
+      'http://es/.kibana-software-inventory-events/_refresh',
+      'http://es/.kibana-software-inventory-events/_count',
+    ]);
+  });
+
+  it('does not refresh indices outside the plugin, such as the synthetic logs', async () => {
+    const { fetchFn, calls } = fakeFetch([{ body: { hits: { hits: [] } } }]);
+    const es = createEsClient({ ...credentials, esUrl: 'http://es/', fetchFn });
+    await es.search('logs-softwareinventory.synthetic-default', { query: { match_all: {} } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toContain('/_search');
+  });
+
   it('summarizes real failures', () => {
     expect(
       summarizeBulk({

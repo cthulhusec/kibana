@@ -14,6 +14,8 @@
 
 import type { InstanceDoc, ExposureLevel, SoftwareCategory } from '../../../common/types';
 import type { DailyRollup } from '../../../common/history';
+import { diffValues } from '../assertions';
+import type { JsonValue } from '../clients';
 import { parseCatalogId } from '../ids';
 
 export const LOOKBACK_DAYS = 7;
@@ -250,3 +252,38 @@ export const computeRollupOracle = ({
 export const dayStartOf = (date: string): string => `${date}T00:00:00.000Z`;
 export const dayEndOf = (date: string): string =>
   new Date(Date.parse(dayStartOf(date)) + DAY_MS).toISOString();
+
+/**
+ * Relative tolerance for `total_software`. The rollup counts distinct software ids with an
+ * Elasticsearch `cardinality` aggregation, which is approximate (about 1 in 5000 at the plugin's
+ * precision threshold), so the oracle's exact set size may differ by a little. Every other
+ * rollup field is an exact count.
+ */
+export const TOTAL_SOFTWARE_TOLERANCE = 0.01;
+
+/** Diffs a stored rollup against the oracle: exact, except `total_software` within tolerance. */
+export const diffRollupAgainstOracle = (
+  expected: object,
+  actual: object,
+  path: string
+): string[] => {
+  const { total_software: expectedSoftware, ...expectedRest } = { ...expected } as Record<
+    string,
+    unknown
+  >;
+  const { total_software: actualSoftware, ...actualRest } = { ...actual } as Record<
+    string,
+    unknown
+  >;
+  const diffs = diffValues(expectedRest as JsonValue, actualRest as JsonValue, path);
+  if (typeof expectedSoftware !== 'number' || typeof actualSoftware !== 'number') {
+    return [...diffs, `${path}.total_software: expected a number, got ${String(actualSoftware)}`];
+  }
+  const allowed = Math.max(1, Math.ceil(expectedSoftware * TOTAL_SOFTWARE_TOLERANCE));
+  return Math.abs(expectedSoftware - actualSoftware) <= allowed
+    ? diffs
+    : [
+        ...diffs,
+        `${path}.total_software: expected ${expectedSoftware} (+/- ${allowed}), got ${actualSoftware}`,
+      ];
+};

@@ -86,10 +86,21 @@ describe('case registry', () => {
     expect(ALL_CASES.slice(0, 3).map(({ id }) => id)).toEqual(['T0-1', 'T0-2', 'T0-3']);
   });
 
+  it('puts DO-15..DO-18 after the log cases and keeps RG out of "all"', () => {
+    const order = ALL_CASES.map(({ id }) => id);
+    expect(order.indexOf('DL-10')).toBeLessThan(order.indexOf('DO-15'));
+    expect(order.indexOf('DO-14')).toBeLessThan(order.indexOf('DL-0'));
+    expect(order.indexOf('DO-18')).toBeLessThan(order.indexOf('EC-1'));
+  });
+
   it('selects by family, id, and "all", in registry order', () => {
     expect(selectCases('t0-3,T0-1').map(({ id }) => id)).toEqual(['T0-1', 'T0-3']);
     expect(selectCases('T0').map(({ id }) => id)).toEqual(['T0-1', 'T0-2', 'T0-3']);
-    expect(selectCases('all')).toHaveLength(ALL_CASES.length);
+    expect(selectCases('all')).toHaveLength(
+      ALL_CASES.filter(({ family }) => family !== 'RG').length
+    );
+    expect(selectCases('all').some(({ family }) => family === 'RG')).toBe(false);
+    expect(selectCases('RG').length).toBeGreaterThan(0);
     const discoverOsquery = selectCases('DO');
     expect(discoverOsquery.length).toBeGreaterThan(0);
     expect(discoverOsquery.every(({ id, family }) => family === 'DO' && id.startsWith('DO-'))).toBe(true);
