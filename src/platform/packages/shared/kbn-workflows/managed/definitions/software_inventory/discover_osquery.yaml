@@ -1,0 +1,170 @@
+version: "1"
+# Every 6h: run software saved queries on every Osquery agent and ingest each query's rows with
+# its own `softwareInventory.ingestCandidates` call (source osquery).
+#
+# Assumptions the plugin must satisfy:
+# - `osquery.runQuery` only runs an existing SAVED QUERY by id (`saved_query`); it cannot take
+#   raw SQL, so the plugin (or an operator) must create these saved queries. Each aliases its
+#   columns to `name`, `version`, `install_path`:
+#     software_inventory_linux_packages
+#       SELECT name, version, '' AS install_path FROM deb_packages
+#       UNION ALL SELECT name, version, '' AS install_path FROM rpm_packages;
+#     software_inventory_windows_programs
+#       SELECT name, version, install_location AS install_path FROM programs;
+#     software_inventory_macos_apps
+#       SELECT bundle_name AS name, bundle_short_version AS version, path AS install_path FROM apps;
+#     software_inventory_dependencies   (all platforms)
+#       SELECT name, version, path AS install_path FROM python_packages
+#       UNION ALL SELECT name, version, path AS install_path FROM npm_packages;
+# - Not implemented: a `file`-table manifest find (package.json, requirements.txt, pom.xml).
+#   It needs wildcard path scans that are unbounded on large hosts, so it is left out of the POC.
+# - Each row carries `agent.id` and, when the result document has one, `agent.name`. The ingest
+#   step resolves the agent id to the Fleet host name, so osquery, logs and Fleet sightings of one
+#   machine land on the same instance.
+#
+# Removals (`snapshot`):
+# - One ingest call per query. `snapshot` is true only when that query's output is complete:
+#   `status` is `success`, `truncated` is false and there is no `error_code`. Otherwise the rows
+#   are still upserted, but nothing is marked removed.
+# - A snapshot only removes instances on hosts that sent rows in that call, and only instances
+#   whose catalog category is one that host reported in that call. So a dependencies call never
+#   removes OS packages, a failed query never removes anything, and absent hosts are untouched.
+#
+# Limitation: `max_rows` caps the TOTAL rows of a query across all agents, not rows per host.
+#   It is 5000, the ingest step's per-call limit. One Linux host can have 2000+ packages, so in a
+#   larger fleet the query is `truncated`: the first 5000 rows are upserted and removals are
+#   skipped for that run. A per-agent fan-out (`agent_ids` batches) is out of scope for the POC.
+#
+# Row mapping: rows with a blank `name` or blank `agent.id` are dropped (`!= blank`), and blank
+#   optional fields (`version`, `install_path`, `host_name`) are omitted. The ingest step also
+#   skips invalid rows on its own and reports them in `skipped`, so one bad row never fails a batch.
+#
+# Every query and ingest step continues on failure (a platform with no agents makes `runQuery`
+# fail), and a failed query step contributes no rows. Do not add `on-failure.retry`: runQuery
+# dispatch is not idempotent.
+name: Software inventory - discover with Osquery
+description: Collect installed software, OS packages and language dependencies from Osquery agents
+tags:
+  - software-inventory
+enabled: false
+settings:
+  concurrency:
+    key: "software-inventory-discover-osquery"
+    strategy: drop
+    max: 1
+triggers:
+  - type: scheduled
+    with:
+      every: "6h"
+steps:
+  - name: query_linux
+    type: osquery.runQuery
+    with:
+      saved_query: software_inventory_linux_packages
+      agent_platforms: ["linux"]
+      wait_timeout: 10m
+      max_rows: 5000
+    on-failure:
+      continue: true
+
+  - name: query_windows
+    type: osquery.runQuery
+    with:
+      saved_query: software_inventory_windows_programs
+      agent_platforms: ["windows"]
+      wait_timeout: 10m
+      max_rows: 5000
+    on-failure:
+      continue: true
+
+  - name: query_macos
+    type: osquery.runQuery
+    with:
+      saved_query: software_inventory_macos_apps
+      agent_platforms: ["darwin"]
+      wait_timeout: 10m
+      max_rows: 5000
+    on-failure:
+      continue: true
+
+  - name: query_dependencies
+    type: osquery.runQuery
+    with:
+      saved_query: software_inventory_dependencies
+      agent_platforms: ["linux", "darwin", "windows"]
+      wait_timeout: 10m
+      max_rows: 5000
+    on-failure:
+      continue: true
+
+  # Row -> RawCandidate mapping only (no normalization). `| json` quotes and escapes each value.
+  - name: build_linux
+    type: data.set
+    with:
+      candidates_json: |-
+        [{% assign sep = '' %}
+        {%- for r in steps.query_linux.output.rows -%}{%- if r.columns.name != blank and r.agent.id != blank -%}{{ sep }}{ {%- if r.agent.name != blank -%}"host_name": {{ r.agent.name | json }},{%- endif -%}{%- if r.columns.version != blank -%}"version": {{ r.columns.version | json }},{%- endif -%}"host_id": {{ r.agent.id | json }},"name": {{ r.columns.name | json }},"category": "os_package"}{%- assign sep = ',' -%}{%- endif -%}{%- endfor -%}
+        ]
+
+  - name: ingest_linux
+    type: softwareInventory.ingestCandidates
+    with:
+      source: osquery
+      snapshot: "${{ steps.query_linux.output.status == 'success' and steps.query_linux.output.truncated == false and steps.query_linux.output.error_code == blank }}"
+      candidates: "${{ steps.build_linux.output.candidates_json | json_parse }}"
+    on-failure:
+      continue: true
+
+  # Row -> RawCandidate mapping only (no normalization). `| json` quotes and escapes each value.
+  - name: build_windows
+    type: data.set
+    with:
+      candidates_json: |-
+        [{% assign sep = '' %}
+        {%- for r in steps.query_windows.output.rows -%}{%- if r.columns.name != blank and r.agent.id != blank -%}{{ sep }}{ {%- if r.agent.name != blank -%}"host_name": {{ r.agent.name | json }},{%- endif -%}{%- if r.columns.version != blank -%}"version": {{ r.columns.version | json }},{%- endif -%}{%- if r.columns.install_path != blank -%}"install_path": {{ r.columns.install_path | json }},{%- endif -%}"host_id": {{ r.agent.id | json }},"name": {{ r.columns.name | json }},"category": "application"}{%- assign sep = ',' -%}{%- endif -%}{%- endfor -%}
+        ]
+
+  - name: ingest_windows
+    type: softwareInventory.ingestCandidates
+    with:
+      source: osquery
+      snapshot: "${{ steps.query_windows.output.status == 'success' and steps.query_windows.output.truncated == false and steps.query_windows.output.error_code == blank }}"
+      candidates: "${{ steps.build_windows.output.candidates_json | json_parse }}"
+    on-failure:
+      continue: true
+
+  # Row -> RawCandidate mapping only (no normalization). `| json` quotes and escapes each value.
+  - name: build_macos
+    type: data.set
+    with:
+      candidates_json: |-
+        [{% assign sep = '' %}
+        {%- for r in steps.query_macos.output.rows -%}{%- if r.columns.name != blank and r.agent.id != blank -%}{{ sep }}{ {%- if r.agent.name != blank -%}"host_name": {{ r.agent.name | json }},{%- endif -%}{%- if r.columns.version != blank -%}"version": {{ r.columns.version | json }},{%- endif -%}{%- if r.columns.install_path != blank -%}"install_path": {{ r.columns.install_path | json }},{%- endif -%}"host_id": {{ r.agent.id | json }},"name": {{ r.columns.name | json }},"category": "application"}{%- assign sep = ',' -%}{%- endif -%}{%- endfor -%}
+        ]
+
+  - name: ingest_macos
+    type: softwareInventory.ingestCandidates
+    with:
+      source: osquery
+      snapshot: "${{ steps.query_macos.output.status == 'success' and steps.query_macos.output.truncated == false and steps.query_macos.output.error_code == blank }}"
+      candidates: "${{ steps.build_macos.output.candidates_json | json_parse }}"
+    on-failure:
+      continue: true
+
+  # Row -> RawCandidate mapping only (no normalization). `| json` quotes and escapes each value.
+  - name: build_dependencies
+    type: data.set
+    with:
+      candidates_json: |-
+        [{% assign sep = '' %}
+        {%- for r in steps.query_dependencies.output.rows -%}{%- if r.columns.name != blank and r.agent.id != blank -%}{{ sep }}{ {%- if r.agent.name != blank -%}"host_name": {{ r.agent.name | json }},{%- endif -%}{%- if r.columns.version != blank -%}"version": {{ r.columns.version | json }},{%- endif -%}{%- if r.columns.install_path != blank -%}"install_path": {{ r.columns.install_path | json }},{%- endif -%}"host_id": {{ r.agent.id | json }},"name": {{ r.columns.name | json }},"category": "dependency"}{%- assign sep = ',' -%}{%- endif -%}{%- endfor -%}
+        ]
+
+  - name: ingest_dependencies
+    type: softwareInventory.ingestCandidates
+    with:
+      source: osquery
+      snapshot: "${{ steps.query_dependencies.output.status == 'success' and steps.query_dependencies.output.truncated == false and steps.query_dependencies.output.error_code == blank }}"
+      candidates: "${{ steps.build_dependencies.output.candidates_json | json_parse }}"
+    on-failure:
+      continue: true

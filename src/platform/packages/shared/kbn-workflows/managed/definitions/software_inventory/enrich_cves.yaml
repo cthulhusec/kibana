@@ -1,0 +1,23 @@
+version: "1"
+# Every 1h: look up CVEs for catalog entries not yet checked, oldest check first.
+# `limit: 25` stays under the NVD public rate limit. Runs between the 6h discovery runs, so
+# new software is enriched within the hour after it is ingested.
+name: Software inventory - enrich CVEs
+description: Match catalog entries to CVEs and KEV status
+tags:
+  - software-inventory
+enabled: false
+settings:
+  concurrency:
+    key: "software-inventory-enrich-cves"
+    strategy: drop
+    max: 1
+triggers:
+  - type: scheduled
+    with:
+      every: "1h"
+steps:
+  - name: enrich
+    type: softwareInventory.enrichCves
+    with:
+      limit: 25

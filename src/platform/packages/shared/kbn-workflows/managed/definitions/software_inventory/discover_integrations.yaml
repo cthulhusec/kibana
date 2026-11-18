@@ -1,0 +1,49 @@
+version: "1"
+# Every 12h: list Fleet package policies and report each installed integration as software.
+# Package policies are policy-level, not host-level, so each candidate uses
+# host_id `policy:<agent policy id>` (host_name is the same id, because the package policy
+# response carries no agent policy name). `name` is the Fleet package name and `version` the
+# installed package version. The server maps known package names to the vendor/product they
+# monitor and DROPS unmapped packages (reported in `skipped`): a package such as `system` is not
+# software. The package version is the integration's version, not the monitored software's, so
+# the server stores the version as `unknown` and CVE enrichment skips it.
+# Policy pseudo-hosts are keyed by `policy:<id>` and are never matched against host logs.
+# One package policy attached to several agent policies yields one candidate per agent policy.
+# Assumption: `perPage: 1000` covers the deployment in one page (POC; no paging loop).
+name: Software inventory - discover Fleet integrations
+description: Report Fleet integrations in use as software, keyed by agent policy
+tags:
+  - software-inventory
+enabled: false
+settings:
+  concurrency:
+    key: "software-inventory-discover-integrations"
+    strategy: drop
+    max: 1
+triggers:
+  - type: scheduled
+    with:
+      every: "12h"
+steps:
+  - name: list_package_policies
+    type: kibana.request
+    with:
+      method: GET
+      path: "/api/fleet/package_policies?perPage=1000&page=1"
+      headers:
+        elastic-api-version: "2023-10-31"
+
+  - name: build_candidates
+    type: data.set
+    with:
+      candidates_json: |-
+        [{% assign sep = '' %}
+        {%- for p in steps.list_package_policies.output.items -%}{%- if p.package.name != blank -%}{%- for pid in p.policy_ids -%}{{ sep }}{"host_id": {{ pid | prepend: 'policy:' | json }},"host_name": {{ pid | json }},"name": {{ p.package.name | json }},{%- if p.package.version != blank -%}"version": {{ p.package.version | json }},{%- endif -%}"category": "application"}{%- assign sep = ',' -%}{%- endfor -%}{%- endif -%}{%- endfor -%}
+        ]
+
+  - name: ingest
+    type: softwareInventory.ingestCandidates
+    with:
+      source: fleet_integration
+      snapshot: false
+      candidates: "${{ steps.build_candidates.output.candidates_json | json_parse }}"

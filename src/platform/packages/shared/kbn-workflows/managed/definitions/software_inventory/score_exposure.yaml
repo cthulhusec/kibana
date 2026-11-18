@@ -1,0 +1,30 @@
+version: "1"
+# Every 6h: score exposure from the last 7 days of network signals, mark instances stale when
+# no source has seen them for 30 days, then write today's trend rollup (idempotent per UTC day).
+name: Software inventory - score exposure
+description: Score internet exposure of software instances and mark stale ones
+tags:
+  - software-inventory
+enabled: false
+settings:
+  concurrency:
+    key: "software-inventory-score-exposure"
+    strategy: drop
+    max: 1
+triggers:
+  - type: scheduled
+    with:
+      every: "6h"
+steps:
+  - name: score
+    type: softwareInventory.scoreExposure
+    with:
+      lookback_days: 7
+
+  - name: mark_stale
+    type: softwareInventory.markStale
+    with:
+      stale_after_days: 30
+
+  - name: snapshot_rollup
+    type: softwareInventory.snapshotRollup

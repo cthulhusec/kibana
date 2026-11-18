@@ -1,0 +1,84 @@
+version: "1"
+# Every 6h: derive software from the last 24h of logs-* with two bounded ES|QL queries:
+# appliances (observer.vendor/product/version) and services (service.name/version).
+# Assumptions: ECS fields `host.id`, `host.name`, `observer.*` and `service.*` are mapped in
+# logs-* (ES|QL fails on a column that exists in no index; the query steps continue on failure).
+# `user_agent.*` is left out: it describes clients, not software the host runs.
+#
+# Host identity:
+# - Appliance rows describe the device that produced the log, not the agent that collected it
+#   (for syslog and network integrations `host.*` is the collector). So the appliance host is
+#   `observer.hostname`, falling back to `observer.serial_number`, then the first `observer.ip`.
+#   Two firewalls behind one collector stay two instances.
+# - Service rows keep `host.*`: the service runs on the host that shipped the log. host_id falls
+#   back to host.name when host.id is missing.
+# - The server keys every instance on the lower-cased host name (else the host id), so a host seen
+#   here and by Osquery is the same instance.
+#
+# `observed_at` is the latest `@timestamp` of each group, so when one host reports two versions
+# within the window the latest sighting wins instead of the last row.
+# Column order is fixed by KEEP: host_id, host_name, vendor, name, version, observed_at.
+# `snapshot` is false: log sightings never prove a package is gone.
+name: Software inventory - discover from logs
+description: Infer appliances and services with versions from recent logs
+tags:
+  - software-inventory
+enabled: false
+settings:
+  concurrency:
+    key: "software-inventory-discover-logs"
+    strategy: drop
+    max: 1
+triggers:
+  - type: scheduled
+    with:
+      every: "6h"
+steps:
+  - name: query_appliances
+    type: elasticsearch.esql.query
+    with:
+      query: |-
+        FROM logs-*
+        | WHERE @timestamp > NOW() - 24 hours AND observer.product IS NOT NULL AND observer.version IS NOT NULL
+        | EVAL host_id = COALESCE(observer.hostname, observer.serial_number, MV_FIRST(TO_STRING(observer.ip))), host_name = observer.hostname
+        | WHERE host_id IS NOT NULL
+        | STATS last_seen = MAX(@timestamp) BY host_id, host_name, observer.vendor, observer.product, observer.version
+        | EVAL observed_at = TO_STRING(last_seen)
+        | RENAME observer.vendor AS vendor, observer.product AS name, observer.version AS version
+        | KEEP host_id, host_name, vendor, name, version, observed_at
+        | LIMIT 2500
+      format: json
+    on-failure:
+      continue: true
+
+  - name: query_services
+    type: elasticsearch.esql.query
+    with:
+      query: |-
+        FROM logs-*
+        | WHERE @timestamp > NOW() - 24 hours AND service.name IS NOT NULL AND service.version IS NOT NULL
+        | STATS last_seen = MAX(@timestamp) BY host.id, host.name, service.name, service.version
+        | EVAL host_id = COALESCE(host.id, host.name), vendor = TO_STRING(null), observed_at = TO_STRING(last_seen)
+        | WHERE host_id IS NOT NULL
+        | RENAME host.name AS host_name, service.name AS name, service.version AS version
+        | KEEP host_id, host_name, vendor, name, version, observed_at
+        | LIMIT 2500
+      format: json
+    on-failure:
+      continue: true
+
+  - name: build_candidates
+    type: data.set
+    with:
+      candidates_json: |-
+        [{% assign sep = '' %}
+        {%- for r in steps.query_appliances.output.values -%}{%- if r[0] != blank and r[3] != blank -%}{{ sep }}{ {%- if r[1] != blank -%}"host_name": {{ r[1] | json }},{%- endif -%}{%- if r[2] != blank -%}"vendor": {{ r[2] | json }},{%- endif -%}{%- if r[4] != blank -%}"version": {{ r[4] | json }},{%- endif -%}{%- if r[5] != blank -%}"observed_at": {{ r[5] | json }},{%- endif -%}"host_id": {{ r[0] | json }},"name": {{ r[3] | json }},"category": "appliance"}{%- assign sep = ',' -%}{%- endif -%}{%- endfor -%}
+        {%- for r in steps.query_services.output.values -%}{%- if r[0] != blank and r[3] != blank -%}{{ sep }}{ {%- if r[1] != blank -%}"host_name": {{ r[1] | json }},{%- endif -%}{%- if r[4] != blank -%}"version": {{ r[4] | json }},{%- endif -%}{%- if r[5] != blank -%}"observed_at": {{ r[5] | json }},{%- endif -%}"host_id": {{ r[0] | json }},"name": {{ r[3] | json }},"category": "application"}{%- assign sep = ',' -%}{%- endif -%}{%- endfor -%}
+        ]
+
+  - name: ingest
+    type: softwareInventory.ingestCandidates
+    with:
+      source: logs
+      snapshot: false
+      candidates: "${{ steps.build_candidates.output.candidates_json | json_parse }}"
