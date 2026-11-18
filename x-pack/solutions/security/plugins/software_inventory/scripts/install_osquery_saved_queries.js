@@ -101,7 +101,10 @@ const main = async () => {
       console.log(`Skipped "${savedQuery.id}": already exists in space "${space}".`);
       continue;
     }
-    await request('POST', '/api/osquery/saved_queries', { ...savedQuery, interval: DEFAULT_INTERVAL });
+    await request('POST', '/api/osquery/saved_queries', {
+      ...savedQuery,
+      interval: DEFAULT_INTERVAL,
+    });
     console.log(`Created "${savedQuery.id}" in space "${space}".`);
   }
 };
