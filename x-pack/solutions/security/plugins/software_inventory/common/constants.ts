@@ -55,3 +55,10 @@ export const MAX_CANDIDATES_PER_CALL = 5000;
 
 /** Longest `from`..`to` range the history routes accept. */
 export const MAX_HISTORY_RANGE_DAYS = 366;
+
+/**
+ * Precision threshold for `cardinality` aggregations that count distinct software. Counts below it
+ * are close to exact; the Elasticsearch maximum is 40000. The default of 3000 reported 5124 for
+ * 5060 distinct versions, so a larger inventory's totals would drift.
+ */
+export const CARDINALITY_PRECISION_THRESHOLD = 40000;

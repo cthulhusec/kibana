@@ -8,6 +8,7 @@
 import type { estypes } from '@elastic/elasticsearch';
 import type { ElasticsearchClient, Logger } from '@kbn/core/server';
 import {
+  CARDINALITY_PRECISION_THRESHOLD,
   CATALOG_INDEX,
   EVENTS_INDEX,
   INSTANCES_INDEX,
@@ -89,7 +90,7 @@ export const ROLLUP_INSTANCES_QUERY: estypes.QueryDslQueryContainer = {
 export const buildRollupAggregations = (
   partition: RollupPartition
 ): Record<string, estypes.AggregationsAggregationContainer> => ({
-  software: { cardinality: { field: 'software_id', precision_threshold: 3000 } },
+  software: { cardinality: { field: 'software_id', precision_threshold: CARDINALITY_PRECISION_THRESHOLD } },
   vulnerable: { filter: idsFilter(partition.vulnerable) },
   critical: { filter: idsFilter(partition.critical) },
   high: { filter: idsFilter(partition.high) },

@@ -6,6 +6,7 @@
  */
 
 import type { estypes } from '@elastic/elasticsearch';
+import { CARDINALITY_PRECISION_THRESHOLD } from '../../common/constants';
 import type { DiscoverySource, SoftwareCategory, SummaryResponse } from '../../common/types';
 import { buildPatchedSinceRange, RECENTLY_PATCHED_DAYS } from './query_builders';
 
@@ -63,7 +64,7 @@ export const buildSummaryAggregations = (
     vulnerable: { filter: softwareIdsFilter(partition.vulnerableIds) },
     known_exploited: { filter: softwareIdsFilter(partition.knownExploitedIds) },
     recently_patched: { filter: buildPatchedSinceRange(RECENTLY_PATCHED_DAYS, now) },
-    software: { cardinality: { field: 'software_id', precision_threshold: 3000 } },
+    software: { cardinality: { field: 'software_id', precision_threshold: CARDINALITY_PRECISION_THRESHOLD } },
     by_source: { terms: { field: 'sources', size: 10 } },
     ...categoryAggs,
   };
