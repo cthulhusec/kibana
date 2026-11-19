@@ -369,20 +369,23 @@ const de4: TestCase['run'] = async (ctx) => {
 const de6: TestCase['run'] = async (ctx) => {
   const blocked = staleGuard(ctx);
   if (blocked) return blocked;
+  const osqueryStartedAt = new Date().toISOString();
+  // A test run needs an existing workflow id, so the inline ingest runs under the Osquery one.
   const osqueryRun = await ctx.runWorkflow({
-    workflow: 'discoverEndpoint',
+    workflow: 'discoverOsquery',
     yaml: buildOsqueryMergeYaml(),
-    workflowId: 'si-test-de-6-osquery-row',
   });
   const osqueryEngine = checkEngine(osqueryRun.execution, { isTestRun: true });
 
-  // Run the stored endpoint workflow again: the merged instance must stay one instance.
+  // Run the stored endpoint workflow again: the merged instance must stay one instance. The
+  // Osquery row has no observed_at, so the merged `last_seen` is the Osquery run time, not the
+  // endpoint sighting; that is checked separately below.
   const result = await runStage(ctx, {
     stage: 'B',
     ingest: DE_INGEST.idempotent,
     afterFlipRun: true,
     osqueryMerged: true,
-    sightingHosts: [BOTH_HOST_KEY],
+    sightingHosts: [],
   });
   const onHost = (await findHostInstances(ctx.es, BOTH_HOST_KEY)).filter(
     ({ software_id: id }) => id === BOTH_CATALOG_ID
@@ -393,6 +396,24 @@ const de6: TestCase['run'] = async (ctx) => {
       ? []
       : [`${BOTH_HOST_KEY}: expected one ${BOTH_CATALOG_ID} instance, found ${onHost.length}`],
     1
+  );
+  const [merged] = onHost;
+  const wantFirst = expectedSightingTimes('B', ctx.t0).find(
+    ({ hostKey }) => hostKey === BOTH_HOST_KEY
+  )?.firstSeen;
+  const sightings = layerResult(
+    'inventory',
+    [
+      ...(merged && wantFirst && Date.parse(merged.first_seen) !== Date.parse(wantFirst)
+        ? [`${BOTH_HOST_KEY}: first_seen ${merged.first_seen} != ${wantFirst}`]
+        : []),
+      ...(merged && Date.parse(merged.last_seen) < Date.parse(osqueryStartedAt)
+        ? [
+            `${BOTH_HOST_KEY}: last_seen ${merged.last_seen} is before the Osquery run at ${osqueryStartedAt}`,
+          ]
+        : []),
+    ],
+    2
   );
   const firstSeen = await findEvents(ctx.es, {
     hostKeys: [BOTH_HOST_KEY],
@@ -419,7 +440,9 @@ const de6: TestCase['run'] = async (ctx) => {
       ...result.layers
         .filter(({ layer }) => layer !== 'engine')
         .map((layer) =>
-          layer.layer === 'inventory' ? mergeLayer('inventory', [layer, single, events]) : layer
+          layer.layer === 'inventory'
+            ? mergeLayer('inventory', [layer, single, sightings, events])
+            : layer
         ),
     ],
     result.notes
@@ -430,7 +453,7 @@ export const cases: TestCase[] = [
   {
     id: 'DE-0',
     family: 'DE',
-    title: 'No endpoint data stream: the query fails, the run completes, nothing is written',
+    title: 'No endpoint data stream: the query fails on unknown columns, nothing is written',
     run: de0,
   },
   {

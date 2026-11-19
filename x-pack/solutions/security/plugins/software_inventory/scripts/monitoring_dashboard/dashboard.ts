@@ -210,7 +210,7 @@ const HEADER = `## Software inventory: discovery workflow monitoring
 
 **This page is test tooling.** It exists to check that the software inventory discovery workflows run and produce data, and it may not ship with the product. Edit it freely in the dashboard UI. The installer script overwrites those edits when you run it again.
 
-The five managed workflows (ids start with \`system-security-software-inventory-\`):
+The managed workflows (ids start with \`system-security-software-inventory-\`):
 
 ${WORKFLOW_ID_LIST.map(
   (id) => `* \`${id.replace('system-security-software-inventory-', '')}\``

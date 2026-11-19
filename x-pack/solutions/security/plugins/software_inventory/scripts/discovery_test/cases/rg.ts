@@ -294,7 +294,7 @@ export const createRgCases = (deps: RgDeps = { now: () => new Date() }): TestCas
   {
     id: 'RG-5',
     family: 'RG',
-    title: 'The five managed workflows are disabled with the registered definition',
+    title: 'The six managed workflows are disabled with the registered definition',
     run: rg5,
   },
   {

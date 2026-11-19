@@ -1,11 +1,13 @@
 # Software inventory discovery workflows: test plan
 
-This plan tests the five managed software inventory workflows end to end on a live stack. It
+This plan tests the six managed software inventory workflows end to end on a live stack. It
 runs the production workflow YAML through the real workflow engine, the real custom steps, and
 real Elasticsearch writes. Only the external inputs are replaced:
 
 - Osquery results come from fixtures with the exact `osquery.runQuery` output shape.
 - Log discovery and exposure scoring read synthetic documents in a dedicated `logs-*` data stream.
+- Endpoint discovery reads synthetic Elastic Defend process events in a dedicated
+  `logs-endpoint.events.process-*` data stream.
 - The Fleet package policy response comes from fixtures (or a real, empty Fleet).
 - NVD and CISA KEV responses come from a local stub server.
 
@@ -13,7 +15,7 @@ The plan is executable: each test case lists its setup, trigger, and exact expec
 harness that automates it does not exist yet; [Harness to build](#harness-to-build) specifies it.
 
 Verified on 2026-11-18 against Elasticsearch `9.7.0-SNAPSHOT` and Kibana at
-`http://localhost:5601/tdy`, with the five workflows installed (managed, disabled) in the default
+`http://localhost:5601/tdy`, with the six workflows installed (managed, disabled) in the default
 space and the demo seed loaded (65 instances, 31 catalog entries, 38 events, 60 rollups).
 
 ## Contents
@@ -23,7 +25,7 @@ space and the demo seed loaded (65 instances, 31 catalog entries, 38 events, 60 
 - [Environment and prerequisites](#environment-and-prerequisites)
 - [Safety](#safety)
 - [Observability with the monitoring dashboard](#observability-with-the-monitoring-dashboard)
-- [Test data design](#test-data-design)
+- [Test data design](#test-data-design) (including [Synthetic Defend events](#synthetic-defend-process-events))
 - [Test matrix](#test-matrix)
 - [Execution procedure](#execution-procedure)
 - [Harness to build](#harness-to-build)
@@ -49,6 +51,7 @@ The plan covers these workflows (ids prefixed with `system-security-software-inv
 | `discover-osquery` | `query_*` (4), `build_*` (4), `ingest_*` (4) | `osquery.runQuery` replaced by `data.set` fixtures |
 | `discover-integrations` | `list_package_policies`, `build_candidates`, `ingest` | Fleet response replaced by a `data.set` fixture, or real empty Fleet |
 | `discover-logs` | `query_appliances`, `query_services`, `build_candidates`, `ingest` | Synthetic documents in `logs-softwareinventory.synthetic-default` |
+| `discover-endpoint` | `query_processes`, `build_candidates`, `ingest` | Synthetic Defend process events in `logs-endpoint.events.process-sisynthetic` |
 | `enrich-cves` | `enrich` | NVD and KEV served by a local stub |
 | `score-exposure` | `score`, `mark_stale`, `snapshot_rollup` | Synthetic network documents in the same data stream |
 
@@ -193,7 +196,7 @@ is `failed` while its run is `completed`.
 | Kibana | `http://localhost:5601/tdy` (base path `/tdy`), default space |
 | Node | `source ~/.nvm/nvm.sh && nvm use 24.22.3` |
 | Plugin flag | `xpack.softwareInventory.enabled: true` in `config/kibana.dev.yml` (present) |
-| Managed workflows | The five workflows installed in `default`, all disabled. Check: `GET /api/workflows?size=100&managed=managed` |
+| Managed workflows | The six workflows installed in `default`, all disabled. Check: `GET /api/workflows?size=100&managed=managed` |
 | Osquery saved queries | Installed by `node x-pack/solutions/security/plugins/software_inventory/scripts/install_osquery_saved_queries.js` (present; needed only for phase 3) |
 | Demo seed | Loaded by `node x-pack/solutions/security/plugins/software_inventory/scripts/seed_demo_data.js` |
 | Monitoring dashboard | `node x-pack/solutions/security/plugins/software_inventory/scripts/install_monitoring_dashboard.js --kibana-url=http://localhost:5601/tdy` (dashboard id `software-inventory-discovery-monitoring`) |
@@ -245,7 +248,7 @@ The plan performs these writes; none of them ran during planning:
    scratchpad).
 2. Create index template `logs-softwareinventory.synthetic` and data stream
    `logs-softwareinventory.synthetic-default`; delete both at the end.
-3. Execute the five workflows (test variants and, for some cases, the production YAML) and,
+3. Execute the six workflows (test variants and, for some cases, the production YAML) and,
    for scheduling tests, enable copies of them.
 4. Edit three synthetic instance documents directly (`last_seen` for stale, `exposure.evidence`
    for manual evidence).
@@ -484,6 +487,35 @@ Expected `discover-logs` candidates for the phase A run (`ingest` step):
 Expected `ingest` output after `R1`: `{created: 9, unchanged: 1, patched: 0, removed: 0, skipped: 0}`.
 No candidate exists for `synth-collector-01`, `synth-fw-03`, `synth-fw-04`, or `synth-web-03`.
 
+### Synthetic Defend process events
+
+`discover-endpoint` reads `logs-endpoint.events.process-*`. The harness writes to the data stream
+`logs-endpoint.events.process-sisynthetic` (namespace `sisynthetic`) with `create` and fixed document ids,
+so writing a phase twice for the same T0 is a no-op.
+
+When the Endpoint package template (`logs-endpoint.events.process`) is installed, the data stream uses
+its real mappings. Otherwise the harness installs the template `logs-softwareinventory.endpoint-synthetic`
+(priority 300) that maps only the fields the workflow reads. The `cleanup` command always deletes the
+data stream and deletes only the template the harness installed, never the Endpoint package template.
+
+Every host name starts with `synth-win-`, and every timestamp is `T0 - offset`. Run each workflow within
+55 minutes of T0.
+
+| Doc id | Host | Offset | Fields | Result |
+|---|---|---|---|---|
+| E1-01..03 | `synth-win-01` (id and name) | 3 h, 2 h, 1 h | Mozilla Corporation, Firefox, 124.0.1 | One row, `observed_at` T0-1h |
+| E2 | `synth-win-02` | 2 h | No company; code signature `Synth-Signer Inc`; Synth-Signed 1.0 | Vendor from the signature |
+| E3 | `synth-win-03` (name only) | 3 h | Synth-Viewer Corp, Synth-Viewer 2.1 | `host_id` falls back to the host name |
+| E4-SVC, E4-NOTEPAD | `synth-win-04` | 2 h | Microsoft Windows Operating System under `C:\Windows\` and `c:\WINDOWS\` | Excluded |
+| E4-NOEXE | `synth-win-04` | 90 min | No `process.executable`; Synth-NoExe 1.5 | Kept |
+| E5 | `synth-win-05` | 2 h | Product without a file version | Excluded |
+| E6 | `synth-win-06` | 26 h | Synth-Old 2.0 | Outside the window |
+| E7-1, E7-2 | `synth-win-07` | 5 h, 2 h | Synth-Dual 3.0 and 3.1 | Two rows, one instance (3.1) |
+| E8 | `synth-win-08` | 90 min | Synth-Both 5.0 | Merged with Osquery in DE-6 |
+| E9 (phase B) | `synth-win-01` | 30 min | Firefox 125.0.1 | The patch |
+
+Phase A yields seven ES|QL rows and six instances. Phase B adds one row for the same six instances.
+
 ### Fleet fixtures
 
 `discover-integrations` reads `steps.list_package_policies.output.items`. The variant replaces
@@ -611,7 +643,7 @@ change on a non-synthetic key fails the case.
 | T0-1 | Variant fidelity | Builder output differs from production only in the four `query_*` steps (deep-equal check of all other steps, `settings`, `name` suffix) |
 | T0-2 | Fixture contract | Each fixture parses with the osquery `runQueryOutputSchema` (or a vendored copy) |
 | T0-3 | Managed-id test run accepted | Test-run a no-op variant of `discover-osquery` (all four fixtures `F-empty`) with `workflowId`; expect `completed`, `workflowId` = managed id, `isTestRun: true`. If refused, switch to the `si-test-` fallback |
-| T0-4 | Preflight | All five workflows disabled; synthetic keys and catalog ids absent; stale-eligible demo count recorded; backup written |
+| T0-4 | Preflight | All six workflows disabled; synthetic keys and catalog ids absent; stale-eligible demo count recorded; backup written |
 
 ### discover-osquery
 
@@ -662,6 +694,23 @@ change on a non-synthetic key fails the case.
 | DL-8 | Idempotent | Re-run without new data | prod | `{unchanged: 10}`; no new events | |
 | DL-9 | Missing field column | Data stream without the dedicated template (`observer.serial_number` never present) | prod | `query_appliances` `failed` (`Unknown column`), services still ingested | SL 1 failed step. Shows the template is required for appliance discovery in real clusters too (risk R4) |
 | DL-10 | Multi-valued `observer.ip` | Extra doc: `observer.ip: [192.0.2.78, 10.9.9.9]`, F5 BIG-IP | prod | Record which value becomes `host_id`; `MV_FIRST` reads doc values, which are sorted, so `10.9.9.9` is expected rather than the first value in `_source` | |
+
+### discover-endpoint
+
+The DE cases run the stored production YAML (`prod`) against the synthetic Defend events described in
+[Synthetic Defend process events](#synthetic-defend-process-events). They run after the DL family and
+DO-15..DO-18, because the endpoint data stream also matches `logs-*` and DL-0 needs a cluster without
+logs. The harness registers them as `DE-0` to `DE-6`.
+
+| ID | Objective | Setup | Trigger | Expected | Panels |
+|---|---|---|---|---|---|
+| DE-0 | No endpoint data stream | No `logs-endpoint.events.process-*` data stream exists | prod | `query_processes` `failed` (`Unknown column`), run `completed` (the step continues on failure), `ingest` all zeros with 0 candidates, no writes. The case is `blocked` when such a data stream exists | SL 1 failed step |
+| DE-1 | Baseline | Phase A | prod | Seven ES\|QL rows; `ingest` `{created: 6}`; source `endpoint`, category `application`, catalog `mozilla:firefox:124.0.1` and the five synthetic ids; `first_seen` events at each row's `observed_at` | DO Instances by source `endpoint` +6 |
+| DE-2 | Exclusions | Within DE-1 | | `synth-win-04` has only the document without an executable (`C:\Windows\` and `c:\WINDOWS\` binaries add nothing); `synth-win-05` (no file version) and `synth-win-06` (26 h old) have no instance | |
+| DE-3 | Version flip | Write phase B (`E9`), re-run | prod | `ingest` `{unchanged: 5, patched: 1}`; Firefox on `synth-win-01` is `patched` with history `124.0.1` (T0-1h) then `125.0.1` (T0-30m), a `version_changed` event, and `previous_software_id` `mozilla:firefox:124.0.1` | DO Events `version_changed` +1 |
+| DE-4 | Snapshot false | Delete the `synth-win-03` documents, re-run, then restore them | prod | `ingest` `{unchanged: 5}` with 7 candidates; the `synth-win-03` instance stays `active` with unchanged sightings; Firefox returns from `patched` to `active` and keeps its history | |
+| DE-5 | Latest sighting wins | Within DE-1 | | `synth-win-07` reports `Synth-Dual` 3.0 (T0-5h) and 3.1 (T0-2h): one instance at 3.1, history `[3.1]`, no catalog entry for 3.0 | |
+| DE-6 | Cross-source identity | After DE-4, ingest an Osquery row for `synth-win-08`, then re-run the stored workflow | prod | One `Synth-Both` instance with `sources: [endpoint, osquery]`, `first_seen` at the endpoint sighting, `last_seen` at or after the Osquery run, one `first_seen` event (source `endpoint`); the re-run reports `{unchanged: 6}` | |
 
 ### enrich-cves
 
@@ -743,7 +792,7 @@ Run after cleanup and restore.
 | RG-2 | `_source` of every demo instance and catalog entry equals the backup (hash compare) |
 | RG-3 | No document with a synthetic host key, synthetic catalog id, or `192.0.2.77` remains |
 | RG-4 | Today's rollup equals the backup copy |
-| RG-5 | The five managed workflows are disabled with an unchanged `definitionHash` |
+| RG-5 | The six managed workflows are disabled with an unchanged `definitionHash` |
 | RG-6 | `logs-softwareinventory.synthetic-*` and its template are gone; no `si-test-*` workflow remains |
 
 ## Execution procedure
@@ -779,7 +828,7 @@ Run after cleanup and restore.
    kbn "$KBN/api/workflows/executions/$X/step/<stepExecutionId>" | jq .output
    ```
 
-6. Run the discovery cases in order: DO-1..DO-14, DI-1..DI-5, DL-0 (before step 4 if you run it), DL-1..DL-10, DO-15..DO-18.
+6. Run the discovery cases in order: DO-1..DO-14, DI-1..DI-5, DL-0 (before step 4 if you run it), DL-1..DL-10, DO-15..DO-18, DE-0..DE-6. DE-0 needs a cluster without any `logs-endpoint.events.process-*` data stream.
 7. Start the stub (`node .../run_discovery_tests.js nvd-stub --port 5699`), confirm the config change is active, and run EC-1..EC-12.
 8. Run SE-1..SE-12, then E2E-1..E2E-5 from a clean synthetic state (`cleanup --synthetic-only`).
 9. Run SC-1..SC-9 (SC-8 only with approval).

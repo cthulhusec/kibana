@@ -51,7 +51,7 @@ export const checkDiscoverEndpointSteps = async (
     rows,
     ingest,
     candidateCount,
-    failedPattern = /Unknown index/i,
+    failedPattern = /Unknown column/i,
   }: DiscoverEndpointStepExpectation
 ): Promise<LayerResult> => {
   const diffs: string[] = [];

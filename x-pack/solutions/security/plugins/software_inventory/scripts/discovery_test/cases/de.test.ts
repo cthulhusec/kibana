@@ -53,9 +53,7 @@ interface RunShape {
   candidateCount: number;
 }
 
-const UNKNOWN_INDEX = {
-  message: 'verification_exception: Unknown index [logs-endpoint.events.process-*]',
-};
+const UNKNOWN_COLUMN = { message: 'verification_exception: Unknown column [process.pe.product]' };
 
 const discoverEndpointRun = (stack: FakeStack, shape: RunShape): CompletedRun =>
   stack.registerRun({
@@ -63,7 +61,7 @@ const discoverEndpointRun = (stack: FakeStack, shape: RunShape): CompletedRun =>
     steps: {
       query_processes:
         shape.rows === 'failed'
-          ? { status: 'failed', error: UNKNOWN_INDEX }
+          ? { status: 'failed', error: UNKNOWN_COLUMN }
           : { output: esqlOutput(shape.rows) },
       build_candidates: { output: { candidates_json: '[]' } },
       ingest: {
@@ -106,7 +104,10 @@ const seedDeState = (
       hostId: expected.hostId ?? 'synth-agent-win08',
       previousSoftwareId: expected.previousSoftwareId,
       firstSeen: sighting?.firstSeen,
-      lastSeen: sighting?.lastSeen,
+      // The Osquery row has no observed_at, so a merged instance was last seen at the Osquery run.
+      lastSeen: expected.sources?.includes('osquery')
+        ? new Date(Date.now() + 1000).toISOString()
+        : sighting?.lastSeen,
       versionHistory: flipped
         ? [
             {
@@ -178,7 +179,7 @@ describe('DE registry', () => {
 });
 
 describe('DE-0', () => {
-  it('passes when the query fails on an unknown index and ingest writes nothing', async () => {
+  it('passes when the query fails on unknown columns and ingest writes nothing', async () => {
     const stack = buildFakeStack();
     const { result, started } = await run(stack, 'DE-0', () =>
       discoverEndpointRun(stack, { rows: 'failed', ingest: {}, candidateCount: 0 })
@@ -406,7 +407,7 @@ describe('DE-4 (snapshot false)', () => {
 describe('DE-6 (cross-source identity)', () => {
   const osqueryRun = (stack: FakeStack): CompletedRun =>
     stack.registerRun({
-      workflowId: 'si-test-de-6-osquery-row',
+      workflowId: getWorkflowId('discoverOsquery'),
       steps: {
         ingest: {
           input: { source: 'osquery', snapshot: false, candidates: [{}] },
@@ -428,9 +429,9 @@ describe('DE-6 (cross-source identity)', () => {
     const result = await getCase('DE-6').run(ctx);
     expect(diffsOf(result)).toEqual([]);
     expect(result.status).toBe('pass');
-    expect(started.map(({ workflowId }) => workflowId)).toEqual([
-      'si-test-de-6-osquery-row',
-      undefined,
+    expect(started.map(({ workflow }) => workflow)).toEqual([
+      'discoverOsquery',
+      'discoverEndpoint',
     ]);
   });
 
