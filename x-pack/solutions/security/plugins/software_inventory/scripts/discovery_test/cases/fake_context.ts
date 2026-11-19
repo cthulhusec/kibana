@@ -169,6 +169,8 @@ export const fakeContext = ({
   runWorkflow,
   writeLogs: unexpected('writeLogs'),
   writeLogDocs,
+  writeEndpointLogs: unexpected('writeEndpointLogs'),
+  writeEndpointDocs: unexpected('writeEndpointDocs'),
 });
 
 /** Test-only: hands a typed fixture to a generic client method (`search<T>`, `mget<T>`). */

@@ -9,6 +9,7 @@ import { cases as t0 } from './t0';
 import { cases as discoverOsquery } from './do';
 import { cases as discoverIntegrations } from './di';
 import { cases as discoverLogs } from './dl';
+import { cases as discoverEndpoint } from './de';
 import { cases as enrichCves } from './ec';
 import { cases as scoreExposure } from './se';
 import { cases as endToEnd } from './e2e';
@@ -19,7 +20,8 @@ import { CASE_FAMILIES } from './types';
 
 /**
  * DO-15..DO-18 run after the log cases, as the plan's runbook orders them: DO-15 writes synthetic
- * logs, and DL-0 needs a cluster without any. The numeric suffix of the id decides.
+ * logs, and DL-0 needs a cluster without any. The numeric suffix of the id decides. The DE cases
+ * follow them, because their data stream also matches `logs-*`.
  */
 const LATE_OSQUERY_CASE_FROM = 15;
 const isLateOsqueryCase = ({ id }: TestCase): boolean =>
@@ -32,6 +34,7 @@ export const ALL_CASES: readonly TestCase[] = [
   ...discoverIntegrations,
   ...discoverLogs,
   ...discoverOsquery.filter(isLateOsqueryCase),
+  ...discoverEndpoint,
   ...enrichCves,
   ...scoreExposure,
   ...endToEnd,
@@ -78,7 +81,9 @@ export const selectCases = (
     if (upper === 'ALL') {
       // The RG family checks the stack after cleanup and restore, so `all` leaves it out: run the
       // `regression` command (cleanup, restore, then RG) as the last step.
-      registry.filter(({ family }) => family !== 'RG').forEach((testCase) => selected.add(testCase));
+      registry
+        .filter(({ family }) => family !== 'RG')
+        .forEach((testCase) => selected.add(testCase));
       continue;
     }
     if ((CASE_FAMILIES as readonly string[]).includes(upper)) {

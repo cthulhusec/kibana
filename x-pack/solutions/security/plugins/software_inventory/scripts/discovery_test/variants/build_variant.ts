@@ -19,6 +19,7 @@
 import { isDeepStrictEqual } from 'util';
 import { Document, isMap, isScalar, isSeq, parseDocument } from 'yaml';
 import {
+  SOFTWARE_INVENTORY_DISCOVER_ENDPOINT_WORKFLOW_ID,
   SOFTWARE_INVENTORY_DISCOVER_INTEGRATIONS_WORKFLOW_ID,
   SOFTWARE_INVENTORY_DISCOVER_LOGS_WORKFLOW_ID,
   SOFTWARE_INVENTORY_DISCOVER_OSQUERY_WORKFLOW_ID,
@@ -28,11 +29,12 @@ import {
 } from '@kbn/workflows/managed';
 import { HELPER_STEP_PREFIX } from '../ids';
 
-/** Ids of the five managed workflows, by harness key. */
+/** Ids of the six managed workflows, by harness key. */
 export const PRODUCTION_WORKFLOWS = {
   discoverOsquery: SOFTWARE_INVENTORY_DISCOVER_OSQUERY_WORKFLOW_ID,
   discoverIntegrations: SOFTWARE_INVENTORY_DISCOVER_INTEGRATIONS_WORKFLOW_ID,
   discoverLogs: SOFTWARE_INVENTORY_DISCOVER_LOGS_WORKFLOW_ID,
+  discoverEndpoint: SOFTWARE_INVENTORY_DISCOVER_ENDPOINT_WORKFLOW_ID,
   enrichCves: SOFTWARE_INVENTORY_ENRICH_CVES_WORKFLOW_ID,
   scoreExposure: SOFTWARE_INVENTORY_SCORE_EXPOSURE_WORKFLOW_ID,
 } as const;

@@ -39,6 +39,9 @@ import {
   seedCatalogIds,
   syntheticHostKeyQuery,
 } from './cleanup';
+import type { EndpointPhase, SyntheticEndpointDoc } from './logs/generate_endpoint';
+import { buildEndpointDocs, writeEndpointDocs } from './logs/generate_endpoint';
+import { ensureEndpointDataStream } from './logs/endpoint_template';
 import type { LogPhase, SyntheticLogDoc } from './logs/generate_logs';
 import {
   EXPECTED_PHASE_A_CANDIDATES,
@@ -286,6 +289,14 @@ export const runCases = async (
           writeLogDocs: async (docs: readonly SyntheticLogDoc[]) => {
             await ensureSyntheticDataStream(deps.es);
             return writeLogDocs(deps.es, docs);
+          },
+          writeEndpointLogs: async (phase: EndpointPhase) => {
+            await ensureEndpointDataStream(deps.es);
+            return writeEndpointDocs(deps.es, buildEndpointDocs(phase, deps.t0));
+          },
+          writeEndpointDocs: async (docs: readonly SyntheticEndpointDoc[]) => {
+            await ensureEndpointDataStream(deps.es);
+            return writeEndpointDocs(deps.es, docs);
           },
         };
         await finish(await testCase.run(ctx));

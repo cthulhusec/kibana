@@ -14,16 +14,18 @@
 
 import type { LayerResult } from '../assertions';
 import type { CompletedRun, EsClient, JsonObject, KibanaClient, WaitOptions } from '../clients';
+import type { EndpointPhase, SyntheticEndpointDoc } from '../logs/generate_endpoint';
 import type { LogPhase, SyntheticLogDoc } from '../logs/generate_logs';
 import type { WorkflowKey } from '../variants/build_variant';
 import type { NvdStub } from '../nvd_stub/server';
 
-export type CaseFamily = 'T0' | 'DO' | 'DI' | 'DL' | 'EC' | 'SE' | 'E2E' | 'SC' | 'RG';
+export type CaseFamily = 'T0' | 'DO' | 'DI' | 'DL' | 'DE' | 'EC' | 'SE' | 'E2E' | 'SC' | 'RG';
 export const CASE_FAMILIES: readonly CaseFamily[] = [
   'T0',
   'DO',
   'DI',
   'DL',
+  'DE',
   'EC',
   'SE',
   'E2E',
@@ -102,6 +104,14 @@ export interface CaseContext {
   /** Writes ad-hoc synthetic log documents (for example DL-10 or DO-15). */
   readonly writeLogDocs: (
     docs: readonly SyntheticLogDoc[]
+  ) => Promise<{ written: number; existing: number }>;
+  /** Writes a phase of the synthetic Defend process events (data stream created when missing). */
+  readonly writeEndpointLogs: (
+    phase: EndpointPhase
+  ) => Promise<{ written: number; existing: number }>;
+  /** Writes ad-hoc synthetic Defend process events (for example the DE-4 restore). */
+  readonly writeEndpointDocs: (
+    docs: readonly SyntheticEndpointDoc[]
   ) => Promise<{ written: number; existing: number }>;
 }
 

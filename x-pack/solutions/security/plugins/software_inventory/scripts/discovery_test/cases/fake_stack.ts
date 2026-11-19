@@ -14,6 +14,8 @@
 import type { JsonValue, StepExecutionDetail, WorkflowExecution } from '../clients';
 import { createEsClient, createKibanaClient, toCompletedRun } from '../clients';
 import type { CompletedRun, FetchFn, KibanaClient, EsClient } from '../clients';
+import { buildEndpointDocs } from '../logs/generate_endpoint';
+import type { EndpointPhase, SyntheticEndpointDoc } from '../logs/generate_endpoint';
 import type { LogPhase, SyntheticLogDoc } from '../logs/generate_logs';
 import { buildPhaseDocs } from '../logs/generate_logs';
 import type { CaseContext, CaseRecord, HarnessConfig, RunWorkflowArgs } from './types';
@@ -133,6 +135,7 @@ export interface FakeStack {
   readonly templates: Set<string>;
   readonly calls: string[];
   readonly logPhasesWritten: LogPhase[];
+  readonly endpointPhasesWritten: EndpointPhase[];
   readonly registerRun: (run: FakeRun) => CompletedRun;
   readonly buildContext: (options: {
     t0: Date;
@@ -241,6 +244,14 @@ export const buildFakeStack = (): FakeStack => {
       const size = typeof request.size === 'number' ? request.size : 10;
       return json({ hits: { total: { value: hits.length }, hits: hits.slice(0, size) } });
     }
+    if (action === '_delete_by_query' && method === 'POST') {
+      const request = JSON.parse(body || '{}') as Doc;
+      const doomed = [...store.entries()].filter(([, stored]) =>
+        matches(stored.source, request.query)
+      );
+      doomed.forEach(([docId]) => store.delete(docId));
+      return json({ deleted: doomed.length });
+    }
     if (action === '_count') {
       const request = JSON.parse(body || '{}') as Doc;
       return json({
@@ -323,6 +334,7 @@ export const buildFakeStack = (): FakeStack => {
   };
 
   const logPhasesWritten: LogPhase[] = [];
+  const endpointPhasesWritten: EndpointPhase[] = [];
 
   const buildContext = (options: {
     t0: Date;
@@ -344,6 +356,18 @@ export const buildFakeStack = (): FakeStack => {
           doc._id,
           JSON.parse(JSON.stringify(doc._source))
         );
+      }
+      return Promise.resolve({ written, existing });
+    };
+    const endpointStream = 'logs-endpoint.events.process-sisynthetic';
+    const writeEndpoint = (docs: readonly SyntheticEndpointDoc[]) => {
+      let written = 0;
+      let existing = 0;
+      dataStreams.add(endpointStream);
+      for (const doc of docs) {
+        if (index(endpointStream).has(doc._id)) existing++;
+        else written++;
+        put(endpointStream, doc._id, JSON.parse(JSON.stringify(doc._source)));
       }
       return Promise.resolve({ written, existing });
     };
@@ -373,6 +397,11 @@ export const buildFakeStack = (): FakeStack => {
         return writeDocs(buildPhaseDocs(phase, options.t0));
       },
       writeLogDocs: writeDocs,
+      writeEndpointLogs: (phase) => {
+        endpointPhasesWritten.push(phase);
+        return writeEndpoint(buildEndpointDocs(phase, options.t0));
+      },
+      writeEndpointDocs: writeEndpoint,
     };
     return { ctx, started, executionIds };
   };
@@ -388,6 +417,7 @@ export const buildFakeStack = (): FakeStack => {
     templates,
     calls,
     logPhasesWritten,
+    endpointPhasesWritten,
     registerRun,
     buildContext,
   };

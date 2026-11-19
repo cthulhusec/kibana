@@ -11,7 +11,8 @@
  * - catalog entries that only synthetic data uses: invented `synth-` vendors or products, the
  *   catalog ids the fixtures produce, and ids referenced by synthetic instances. An id referenced
  *   by any non-synthetic instance or present in the demo seed is never deleted;
- * - unless `syntheticOnly`: the synthetic logs data stream and template, and `si-test-*` workflows.
+ * - unless `syntheticOnly`: the synthetic logs and endpoint data streams, the templates the harness
+ *   installed (never the Endpoint package template), and `si-test-*` workflows.
  * Every step is idempotent and reports a count. Demo documents that `enrich-cves` or
  * `score-exposure` modified are restored by `restore` (the demo seed with `--clean`), not here.
  */
@@ -22,7 +23,13 @@ import { generateSeedData } from '../seed/generate_seed_data';
 import type { EsClient, KibanaClient } from './clients';
 import { R1, R2_LINUX, ALL_OSQUERY_FIXTURES } from './fixtures/osquery';
 import { ALL_FLEET_FIXTURES } from './fixtures/fleet';
+import { ALL_DE_CATALOG_IDS } from './expected/de';
 import { EXPECTED_PHASE_A_CANDIDATES, EXPECTED_PHASE_B_CANDIDATE } from './logs/generate_logs';
+import {
+  ENDPOINT_DATA_STREAM,
+  ENDPOINT_TEMPLATE_NAME,
+  deleteEndpointDataStream,
+} from './logs/endpoint_template';
 import {
   SYNTHETIC_DATA_STREAM,
   SYNTHETIC_TEMPLATE_NAME,
@@ -69,6 +76,7 @@ export const KNOWN_SYNTHETIC_CATALOG_IDS: readonly string[] = [
     ...ALL_FLEET_FIXTURES.flatMap((fixture) => fixture.expected.instances.map((i) => i.catalogId)),
     ...EXPECTED_PHASE_A_CANDIDATES.map((candidate) => candidate.catalogId),
     EXPECTED_PHASE_B_CANDIDATE.catalogId,
+    ...ALL_DE_CATALOG_IDS,
   ]),
 ].sort();
 
@@ -199,7 +207,10 @@ export const cleanup = async (
   }
   if (syntheticOnly) return { instancesDeleted, eventsDeleted, catalogDeleted };
 
-  const { dataStreamDeleted, templateDeleted } = await deleteSyntheticDataStream(es);
+  const logs = await deleteSyntheticDataStream(es);
+  const endpoint = await deleteEndpointDataStream(es);
+  const dataStreamDeleted = logs.dataStreamDeleted || endpoint.dataStreamDeleted;
+  const templateDeleted = logs.templateDeleted || endpoint.templateDeleted;
   const workflowIds = await listTestWorkflowIds(kibana);
   for (const id of workflowIds) await kibana.deleteWorkflow(id, { force: true });
   return {
@@ -221,6 +232,9 @@ export interface ResidueReport {
   readonly testWorkflows: readonly string[];
 }
 
+const anyExists = async (es: EsClient, paths: readonly string[]): Promise<boolean> =>
+  (await Promise.all(paths.map((path) => es.exists(path)))).some(Boolean);
+
 /** Read-only: what cleanup would still remove (RG-3 and RG-6 use this). */
 export const findSyntheticResidue = async (
   es: EsClient,
@@ -237,8 +251,14 @@ export const findSyntheticResidue = async (
     es.count(INSTANCES_INDEX, syntheticHostKeyQuery()),
     es.count(EVENTS_INDEX, syntheticHostKeyQuery()),
     planCatalogDeletion(es),
-    es.exists(`/_data_stream/${SYNTHETIC_DATA_STREAM}`),
-    es.exists(`/_index_template/${SYNTHETIC_TEMPLATE_NAME}`),
+    anyExists(es, [
+      `/_data_stream/${SYNTHETIC_DATA_STREAM}`,
+      `/_data_stream/${ENDPOINT_DATA_STREAM}`,
+    ]),
+    anyExists(es, [
+      `/_index_template/${SYNTHETIC_TEMPLATE_NAME}`,
+      `/_index_template/${ENDPOINT_TEMPLATE_NAME}`,
+    ]),
     listTestWorkflowIds(kibana),
   ]);
   return {
