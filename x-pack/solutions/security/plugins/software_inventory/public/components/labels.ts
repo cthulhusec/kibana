@@ -39,6 +39,9 @@ export const SOURCE_LABELS: Record<DiscoverySource, string> = {
     defaultMessage: 'Fleet integration',
   }),
   logs: i18n.translate('xpack.softwareInventory.source.logsLabel', { defaultMessage: 'Logs' }),
+  endpoint: i18n.translate('xpack.softwareInventory.source.endpointLabel', {
+    defaultMessage: 'Endpoint',
+  }),
   manual: i18n.translate('xpack.softwareInventory.source.manualLabel', {
     defaultMessage: 'Manual',
   }),

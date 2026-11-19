@@ -9,6 +9,7 @@
 
 import { parse } from 'yaml';
 import {
+  SOFTWARE_INVENTORY_DISCOVER_ENDPOINT_WORKFLOW,
   SOFTWARE_INVENTORY_DISCOVER_INTEGRATIONS_WORKFLOW,
   SOFTWARE_INVENTORY_DISCOVER_LOGS_WORKFLOW,
   SOFTWARE_INVENTORY_DISCOVER_OSQUERY_WORKFLOW,
@@ -35,6 +36,7 @@ const definitions = [
   SOFTWARE_INVENTORY_DISCOVER_OSQUERY_WORKFLOW,
   SOFTWARE_INVENTORY_DISCOVER_INTEGRATIONS_WORKFLOW,
   SOFTWARE_INVENTORY_DISCOVER_LOGS_WORKFLOW,
+  SOFTWARE_INVENTORY_DISCOVER_ENDPOINT_WORKFLOW,
   SOFTWARE_INVENTORY_ENRICH_CVES_WORKFLOW,
   SOFTWARE_INVENTORY_SCORE_EXPOSURE_WORKFLOW,
 ];
@@ -106,6 +108,61 @@ describe('software inventory managed workflows', () => {
     expect(
       byType(SOFTWARE_INVENTORY_DISCOVER_LOGS_WORKFLOW.yaml, 'softwareInventory.ingestCandidates')
     ).toMatchObject({ source: 'logs', snapshot: false });
+    expect(
+      byType(SOFTWARE_INVENTORY_DISCOVER_ENDPOINT_WORKFLOW.yaml, 'softwareInventory.ingestCandidates')
+    ).toMatchObject({ source: 'endpoint', snapshot: false });
+  });
+
+  describe('discover-endpoint', () => {
+    const workflow = parse(SOFTWARE_INVENTORY_DISCOVER_ENDPOINT_WORKFLOW.yaml) as Workflow;
+    const query = (workflow.steps.find((s) => s.name === 'query_processes')?.with?.query ??
+      '') as string;
+
+    it('reads Defend process events and skips the Windows directory', () => {
+      expect(query).toContain('FROM logs-endpoint.events.process-*');
+      expect(query).toContain('process.pe.product IS NOT NULL');
+      expect(query).toContain('process.pe.file_version IS NOT NULL');
+      expect(query).toContain(
+        'STARTS_WITH(TO_LOWER(COALESCE(process.executable, "")), "c:\\\\windows\\\\")'
+      );
+      expect(query).toContain(
+        'COALESCE(process.pe.company, process.code_signature.subject_name)'
+      );
+      expect(query).toContain('KEEP host_id, host_name, vendor, name, version, observed_at');
+    });
+
+    it('maps process rows to application candidates and omits blank optional fields', async () => {
+      const candidates = await render(workflow, {
+        steps: {
+          query_processes: {
+            output: {
+              values: [
+                ['h1', 'WIN-1', 'Mozilla Corporation', 'Firefox', '125.0.1', '2026-01-01T00:00:00Z'],
+                ['h2', null, null, 'Tool', '', null],
+                ['', 'x', 'v', 'Blank host', '1', null],
+                ['h3', 'WIN-3', 'v', '', '1', null],
+              ],
+            },
+          },
+        },
+      });
+      expect(candidates).toEqual([
+        {
+          host_id: 'h1',
+          host_name: 'WIN-1',
+          vendor: 'Mozilla Corporation',
+          version: '125.0.1',
+          observed_at: '2026-01-01T00:00:00Z',
+          name: 'Firefox',
+          category: 'application',
+        },
+        { host_id: 'h2', name: 'Tool', category: 'application' },
+      ]);
+    });
+
+    it('yields no candidates when the query failed', async () => {
+      expect(await render(workflow, { steps: {} })).toEqual([]);
+    });
   });
 
   it('ingests each osquery query in its own call with a completeness-gated snapshot', () => {

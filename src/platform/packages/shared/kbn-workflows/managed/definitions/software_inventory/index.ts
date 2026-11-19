@@ -17,6 +17,8 @@ export const SOFTWARE_INVENTORY_DISCOVER_INTEGRATIONS_WORKFLOW_ID =
   'system-security-software-inventory-discover-integrations';
 export const SOFTWARE_INVENTORY_DISCOVER_LOGS_WORKFLOW_ID =
   'system-security-software-inventory-discover-logs';
+export const SOFTWARE_INVENTORY_DISCOVER_ENDPOINT_WORKFLOW_ID =
+  'system-security-software-inventory-discover-endpoint';
 export const SOFTWARE_INVENTORY_ENRICH_CVES_WORKFLOW_ID =
   'system-security-software-inventory-enrich-cves';
 export const SOFTWARE_INVENTORY_SCORE_EXPOSURE_WORKFLOW_ID =
@@ -70,6 +72,18 @@ export const SOFTWARE_INVENTORY_DISCOVER_LOGS_WORKFLOW = {
   },
 } as const satisfies ManagedWorkflowDefinition;
 
+export const SOFTWARE_INVENTORY_DISCOVER_ENDPOINT_WORKFLOW = {
+  billable: true,
+  id: SOFTWARE_INVENTORY_DISCOVER_ENDPOINT_WORKFLOW_ID,
+  management: MANAGEMENT,
+  pluginId: PLUGIN_ID,
+  version: 1,
+  visibility: VISIBILITY,
+  get yaml() {
+    return readManagedWorkflowYaml(__dirname, 'discover_endpoint.yaml');
+  },
+} as const satisfies ManagedWorkflowDefinition;
+
 export const SOFTWARE_INVENTORY_ENRICH_CVES_WORKFLOW = {
   billable: true,
   id: SOFTWARE_INVENTORY_ENRICH_CVES_WORKFLOW_ID,
@@ -98,6 +112,7 @@ export const SOFTWARE_INVENTORY_WORKFLOW_IDS = [
   SOFTWARE_INVENTORY_DISCOVER_OSQUERY_WORKFLOW_ID,
   SOFTWARE_INVENTORY_DISCOVER_INTEGRATIONS_WORKFLOW_ID,
   SOFTWARE_INVENTORY_DISCOVER_LOGS_WORKFLOW_ID,
+  SOFTWARE_INVENTORY_DISCOVER_ENDPOINT_WORKFLOW_ID,
   SOFTWARE_INVENTORY_ENRICH_CVES_WORKFLOW_ID,
   SOFTWARE_INVENTORY_SCORE_EXPOSURE_WORKFLOW_ID,
 ] as const;

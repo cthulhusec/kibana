@@ -70,6 +70,7 @@ const querySchema = schema.object({
       schema.literal('osquery'),
       schema.literal('fleet_integration'),
       schema.literal('logs'),
+      schema.literal('endpoint'),
       schema.literal('manual'),
     ])
   ),

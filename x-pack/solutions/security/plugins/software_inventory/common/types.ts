@@ -6,7 +6,7 @@
  */
 
 export type SoftwareCategory = 'application' | 'dependency' | 'appliance' | 'os_package' | 'other';
-export type DiscoverySource = 'osquery' | 'fleet_integration' | 'logs' | 'manual';
+export type DiscoverySource = 'osquery' | 'fleet_integration' | 'logs' | 'endpoint' | 'manual';
 export type InstanceStatus = 'active' | 'patched' | 'removed' | 'stale';
 export type ExposureLevel = 'none' | 'low' | 'medium' | 'high';
 

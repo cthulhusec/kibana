@@ -45,6 +45,7 @@ export const WORKFLOW_IDS = {
   discoverOsquery: 'system-security-software-inventory-discover-osquery',
   discoverIntegrations: 'system-security-software-inventory-discover-integrations',
   discoverLogs: 'system-security-software-inventory-discover-logs',
+  discoverEndpoint: 'system-security-software-inventory-discover-endpoint',
   enrichCves: 'system-security-software-inventory-enrich-cves',
   scoreExposure: 'system-security-software-inventory-score-exposure',
 } as const;

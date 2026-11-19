@@ -43,7 +43,7 @@ export const rawCandidateSchema = lazySchema(() =>
 
 const ingestCandidatesInputSchema = lazySchema(() =>
   z.object({
-    source: z.enum(['osquery', 'fleet_integration', 'logs', 'manual']),
+    source: z.enum(['osquery', 'fleet_integration', 'logs', 'endpoint', 'manual']),
     snapshot: z
       .boolean()
       .default(false)

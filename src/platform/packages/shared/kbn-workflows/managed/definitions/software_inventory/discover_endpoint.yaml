@@ -1,0 +1,70 @@
+version: "1"
+# Every 6h: derive installed-and-running applications from the last 24h of Elastic Defend process
+# events (logs-endpoint.events.process-*), using the PE metadata Defend records for Windows
+# executables: process.pe.company, process.pe.product and process.pe.file_version.
+# Assumptions:
+# - Defend maps process.pe.* and process.code_signature.* (an unmapped column fails the ES|QL; the
+#   query step continues on failure, so the run still completes with zero candidates).
+# - Only executables with PE metadata produce rows. macOS and Linux binaries have none, so those
+#   hosts are covered by Osquery and the package sources instead.
+#
+# Vendor is process.pe.company, falling back to the code-signature subject.
+# Executables under C:\Windows\ are skipped: their PE product is the OS and every binary carries its
+# own build number, which would report a new "version" of Windows on each run.
+# The host is the endpoint that ran the process (host.id, else host.name), and the server keys every
+# instance on the lower-cased host name, so a host seen here and by Osquery is the same instance.
+# The install path is not set: one product runs from several executables, and a per-executable path
+# would create one instance per binary.
+#
+# `observed_at` is the latest `@timestamp` of each group, so when one host reports two versions
+# within the window the latest sighting wins.
+# `snapshot` is false: a program that did not run in the window is not proof it is gone.
+# Column order is fixed by KEEP: host_id, host_name, vendor, name, version, observed_at.
+name: Software inventory - discover from endpoint
+description: Infer applications with versions from recent Elastic Defend process events
+tags:
+  - software-inventory
+enabled: false
+settings:
+  concurrency:
+    key: "software-inventory-discover-endpoint"
+    strategy: drop
+    max: 1
+triggers:
+  - type: scheduled
+    with:
+      every: "6h"
+steps:
+  - name: query_processes
+    type: elasticsearch.esql.query
+    with:
+      query: |-
+        FROM logs-endpoint.events.process-*
+        | WHERE @timestamp > NOW() - 24 hours AND process.pe.product IS NOT NULL AND process.pe.file_version IS NOT NULL
+        | WHERE NOT STARTS_WITH(TO_LOWER(COALESCE(process.executable, "")), "c:\\windows\\")
+        | EVAL host_id = COALESCE(host.id, host.name), vendor = COALESCE(process.pe.company, process.code_signature.subject_name)
+        | WHERE host_id IS NOT NULL
+        | STATS last_seen = MAX(@timestamp) BY host_id, host.name, vendor, process.pe.product, process.pe.file_version
+        | EVAL observed_at = TO_STRING(last_seen)
+        | SORT last_seen DESC, host_id
+        | RENAME host.name AS host_name, process.pe.product AS name, process.pe.file_version AS version
+        | KEEP host_id, host_name, vendor, name, version, observed_at
+        | LIMIT 5000
+      format: json
+    on-failure:
+      continue: true
+
+  - name: build_candidates
+    type: data.set
+    with:
+      candidates_json: |-
+        [{% assign sep = '' %}
+        {%- for r in steps.query_processes.output.values -%}{%- if r[0] != blank and r[3] != blank -%}{{ sep }}{ {%- if r[1] != blank -%}"host_name": {{ r[1] | json }},{%- endif -%}{%- if r[2] != blank -%}"vendor": {{ r[2] | json }},{%- endif -%}{%- if r[4] != blank -%}"version": {{ r[4] | json }},{%- endif -%}{%- if r[5] != blank -%}"observed_at": {{ r[5] | json }},{%- endif -%}"host_id": {{ r[0] | json }},"name": {{ r[3] | json }},"category": "application"}{%- assign sep = ',' -%}{%- endif -%}{%- endfor -%}
+        ]
+
+  - name: ingest
+    type: softwareInventory.ingestCandidates
+    with:
+      source: endpoint
+      snapshot: false
+      candidates: "${{ steps.build_candidates.output.candidates_json | json_parse }}"
